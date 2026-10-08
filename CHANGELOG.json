@@ -377,6 +377,42 @@
       ],
       "id": 7,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "fix: explain a missing front-end build instead of returning 404; clarify setup commands",
+      "summary": "A first local run showed the server returning 404 at / because the front end had not been built: the setup command joined npm install and npm run build with a single & so they ran in parallel and the build failed with 'tsc: command not found'.",
+      "files": [
+        "backend/src/utcoursesplus/api.py",
+        "backend/tests/test_api.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Root page when the front end is not built",
+          "how": "api.create_app registers GET / returning plain-text instructions (cd frontend, npm install && npm run build) when frontend/dist does not exist; covered by a test."
+        },
+        {
+          "what": "README commands",
+          "how": "Setup steps are listed one per line with a note not to join them with a single &; trailing # comments were removed from command lines because zsh passes them to the program as arguments."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "'tsc: command not found' during npm run build, then 404 for / and /favicon.ico from the server",
+          "cause": "The earlier instruction was run as 'npm install & npm run build'; a single & backgrounds the first command, so the build ran before dependencies existed, and no frontend/dist was produced",
+          "fix": "Use && (sequential). The server now says what to do instead of a bare 404."
+        },
+        {
+          "symptom": "'unrecognized arguments: # open http://127.0.0.1:8000' when running the serve command",
+          "cause": "zsh does not treat # as a comment in interactive shells, and the README line had a trailing comment",
+          "fix": "Removed trailing comments from README command lines"
+        }
+      ],
+      "notes": [
+        "The user pasted an API key into the chat. It should be revoked and replaced; it was not written to any file or committed."
+      ],
+      "id": 8,
+      "date": "2026-10-08"
     }
   ]
 }

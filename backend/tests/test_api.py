@@ -177,3 +177,8 @@ def test_syllabus_login_gated_url_rejected(client):
     assert r.status_code in (422, 503) and (
         "login" in r.json()["detail"] or "ANTHROPIC" in r.json()["detail"]
     )
+
+
+def test_root_explains_missing_frontend_build(client):
+    r = client.get("/")
+    assert r.status_code == 200 and "npm install && npm run build" in r.text

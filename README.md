@@ -7,12 +7,16 @@ No paid services except an Anthropic API key for three optional features.
 
 ## One-time setup
 
+Run these one at a time, and wait for each to finish (do not join them with a single `&`).
+
     cd backend
     uv sync
-    uv run playwright install chromium     # only used for the manual login window
+    uv run playwright install chromium
     cd ../frontend
     npm install
     npm run build
+
+`playwright install` is only needed for the manual login window.
 
 ## 1. Load the Spring 2027 schedule
 
@@ -24,23 +28,33 @@ only), identifies itself honestly, waits 3 seconds between requests, caches ever
 CAPTCHA or a login redirect. It never registers, adds, drops or joins a waitlist.
 
     cd backend
-    uv run utcoursesplus login              # visible browser; you type EID, password, Duo yourself
-    uv run utcoursesplus crawl              # every department x lower/upper/grad, plus each Core area
-    uv run utcoursesplus crawl --only "C S" 020     # limit to some departments or Core codes
-    uv run utcoursesplus clear-session      # deletes saved cookies in data/session/
+    uv run utcoursesplus login
+    uv run utcoursesplus crawl
+    uv run utcoursesplus clear-session
+
+`login` opens a visible browser; you type your EID, password and Duo yourself. `crawl` reads every department at
+lower, upper and graduate level plus each Core area; add `--only "C S" 020` to limit it to some departments or Core
+codes. `clear-session` deletes the saved cookies in `data/session/`.
 
 If login does not finish by itself, open the schedule search page in the window and press Enter in the terminal.
 The crawl resumes from `data/cache/`. Without automation: save result pages from your own browser and run
 `uv run utcoursesplus import-html FILE...`, or `import-json FILE`.
 
-    uv run utcoursesplus quality            # counts, parse failures, missing times
-    uv run utcoursesplus reparse            # rebuild from cached pages after a parser update (no requests)
-    uv run utcoursesplus diagnose           # raw example rows for anomalies, in data/diagnose.txt
+    uv run utcoursesplus quality
+    uv run utcoursesplus reparse
+    uv run utcoursesplus diagnose
+
+`quality` prints counts, parse failures and missing times. `reparse` rebuilds from cached pages after a parser update
+(no requests). `diagnose` writes raw example rows for anomalies to `data/diagnose.txt`.
 
 ## 2. Run the app
 
-    export ANTHROPIC_API_KEY=...            # optional; needed only for the three language-model features
-    cd backend && uv run utcoursesplus serve        # then open http://127.0.0.1:8000
+    cd backend
+    uv run utcoursesplus serve
+
+Then open http://127.0.0.1:8000. The language-model features (plain-English preferences, audit parsing, syllabus
+extraction) need `ANTHROPIC_API_KEY` set in the same terminal before `serve`. Type `export ANTHROPIC_API_KEY=` and
+paste the key after it in your own terminal only; never put it in chat, a file in the repo, or a command you share.
 
 For front-end development: `cd frontend && npm run dev` (proxies /api to port 8000).
 

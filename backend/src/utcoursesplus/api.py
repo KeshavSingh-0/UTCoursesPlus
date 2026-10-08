@@ -514,6 +514,19 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
             f = dist / path
             return FileResponse(f if path and f.is_file() else dist / "index.html")
 
+    else:
+        from fastapi.responses import PlainTextResponse
+
+        @app.get("/", response_class=PlainTextResponse)
+        def no_frontend():
+            return PlainTextResponse(
+                "The server is running, but the web interface has not been built.\n"
+                "In another terminal, run these two commands one after the other:\n"
+                "  cd frontend\n"
+                "  npm install && npm run build\n"
+                "Then reload this page. (Use && and not &, so the build waits for the install.)\n"
+            )
+
     return app
 
 
