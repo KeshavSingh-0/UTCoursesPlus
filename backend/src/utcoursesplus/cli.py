@@ -49,19 +49,13 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="saved search home page, used if the live one is unavailable",
     )
-    h = sub.add_parser(
-        "import-html", help="parse result pages you saved from your own browser"
-    )
+    h = sub.add_parser("import-html", help="parse result pages you saved from your own browser")
     h.add_argument("files", nargs="+", type=Path)
     j = sub.add_parser("import-json", help="load sections from a JSON file")
     j.add_argument("file", type=Path)
     sub.add_parser("quality", help="data-quality report")
-    sub.add_parser(
-        "reparse", help="rebuild crawled sections from cached pages (no requests)"
-    )
-    sub.add_parser(
-        "diagnose", help="write raw example rows of anomalies to data/diagnose.txt"
-    )
+    sub.add_parser("reparse", help="rebuild crawled sections from cached pages (no requests)")
+    sub.add_parser("diagnose", help="write raw example rows of anomalies to data/diagnose.txt")
     sub.add_parser("samples", help="print 5 random section rows")
     a = ap.parse_args(argv)
 

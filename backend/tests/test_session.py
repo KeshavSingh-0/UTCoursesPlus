@@ -7,9 +7,7 @@ TITLE = "UT Austin Registrar: Spring 2027 Course Search"
 def test_detects_schedule_pages():
     assert is_schedule_page(BASE, TITLE)
     assert is_schedule_page(BASE.rstrip("/"), TITLE)
-    assert is_schedule_page(
-        BASE + "results/?x=1", "UT Austin Registrar: Spring 2027 Course Search"
-    )
+    assert is_schedule_page(BASE + "results/?x=1", "UT Austin Registrar: Spring 2027 Course Search")
 
 
 def test_rejects_login_and_other_pages():

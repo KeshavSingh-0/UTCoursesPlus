@@ -24,9 +24,7 @@ def cached_pages(cache_dir: Path = CACHE_DIR) -> Iterator[tuple[str, datetime, s
             yield m["url"], datetime.fromisoformat(m["fetched_at"]), body.read_text()
 
 
-def reparse_cache(
-    con: sqlite3.Connection, cache_dir: Path = CACHE_DIR, progress=print
-) -> int:
+def reparse_cache(con: sqlite3.Connection, cache_dir: Path = CACHE_DIR, progress=print) -> int:
     """Replace every section that came from the authenticated crawl with a fresh parse of the cache."""
     with con:
         for t in ("section_tag", "meeting", "section_instructor"):
@@ -67,9 +65,7 @@ def reparse_cache(
     return total
 
 
-def diagnose(
-    cache_dir: Path = CACHE_DIR, out: Path | None = None, per_category: int = 3
-) -> Path:
+def diagnose(cache_dir: Path = CACHE_DIR, out: Path | None = None, per_category: int = 3) -> Path:
     """Write raw HTML of example rows (no cookies, only schedule markup) to data/diagnose.txt."""
     out = out or DATA_DIR / "diagnose.txt"
     found: dict[str, list[str]] = {
@@ -94,28 +90,17 @@ def diagnose(
             if h is not None:
                 header = _clean(h.text())
                 continue
-            cells = {
-                (td.attributes.get("data-th") or "").lower(): td
-                for td in tr.css("td[data-th]")
-            }
+            cells = {(td.attributes.get("data-th") or "").lower(): td for td in tr.css("td[data-th]")}
             uq = cells.get("unique")
             snippet = f"<!-- {header} | {url[-80:]} -->\n{tr.html}"
             if uq is None or not _clean(uq.text()):
                 if len(found["no_unique_rows"]) < per_category:
                     prev = rows[i - 1].html if i else ""
-                    found["no_unique_rows"].append(
-                        f"<!-- previous row -->\n{prev}\n{snippet}"
-                    )
+                    found["no_unique_rows"].append(f"<!-- previous row -->\n{prev}\n{snippet}")
                 continue
-            hours = (
-                [_clean(s.text()) for s in cells["hour"].css("span")]
-                if "hour" in cells
-                else []
-            )
+            hours = [_clean(s.text()) for s in cells["hour"].css("span")] if "hour" in cells else []
             instr = (
-                [_clean(s.text()) for s in cells["instructor"].css("span")]
-                if "instructor" in cells
-                else []
+                [_clean(s.text()) for s in cells["instructor"].css("span")] if "instructor" in cells else []
             )
             if not any(hours) and len(found["no_times"]) < per_category:
                 found["no_times"].append(snippet)

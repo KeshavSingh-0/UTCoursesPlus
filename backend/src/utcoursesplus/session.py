@@ -17,19 +17,13 @@ def is_schedule_page(url: str, title: str) -> bool:
     return (
         u.hostname == SCHEDULE_HOST
         and "/course_schedule/" in u.path
-        and (
-            "Course Search" in title
-            or "Search Results" in title
-            or "Course Schedule" in title
-        )
+        and ("Course Search" in title or "Search Results" in title or "Course Schedule" in title)
     )
 
 
 def _enter_pressed() -> bool:
     try:
-        return bool(select.select([sys.stdin], [], [], 0)[0]) and bool(
-            sys.stdin.readline() is not None
-        )
+        return bool(select.select([sys.stdin], [], [], 0)[0]) and bool(sys.stdin.readline() is not None)
     except (
         OSError,
         ValueError,
@@ -47,16 +41,10 @@ def login(timeout_s: int = 900) -> None:
         ctx = browser.new_context()
         page = ctx.new_page()
         page.goto(SCHEDULE_BASE)
-        print(
-            "A browser window is open. Log in with your EID, password and Duo yourself."
-        )
+        print("A browser window is open. Log in with your EID, password and Duo yourself.")
         print("This program does not read or store them.")
-        print(
-            "It saves your session automatically once the schedule search page loads."
-        )
-        print(
-            "If it does not, open the schedule search page in that window and press Enter here."
-        )
+        print("It saves your session automatically once the schedule search page loads.")
+        print("If it does not, open the schedule search page in that window and press Enter here.")
         deadline = time.time() + timeout_s
         saved = False
         while time.time() < deadline:
@@ -77,15 +65,11 @@ def login(timeout_s: int = 900) -> None:
             time.sleep(1)
         if not saved:
             browser.close()
-            raise SystemExit(
-                "Timed out waiting for login. Run the login command again."
-            )
+            raise SystemExit("Timed out waiting for login. Run the login command again.")
         ctx.storage_state(path=str(SESSION_FILE))
         os.chmod(SESSION_FILE, 0o600)
         browser.close()
-    print(
-        f"Session saved to {SESSION_FILE}. Remove it any time with: uv run utcoursesplus clear-session"
-    )
+    print(f"Session saved to {SESSION_FILE}. Remove it any time with: uv run utcoursesplus clear-session")
 
 
 def clear_session() -> bool:

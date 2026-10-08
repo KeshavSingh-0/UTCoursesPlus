@@ -48,9 +48,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
     cols = {r["name"] for r in con.execute("PRAGMA table_info(section_tag)")}
-    if (
-        "title" not in cols
-    ):  # database created by an earlier version: derived data, rebuild it
+    if "title" not in cols:  # database created by an earlier version: derived data, rebuild it
         con.execute("DROP TABLE section_tag")
         con.executescript(SCHEMA)
     con.executemany(
@@ -141,6 +139,4 @@ def log_page(
         (url, fetched_at, int(from_cache), source, n_sections, len(failures)),
     )
     con.execute("DELETE FROM parse_failure WHERE url=?", (url,))
-    con.executemany(
-        "INSERT INTO parse_failure VALUES(?,?)", [(url, f) for f in failures]
-    )
+    con.executemany("INSERT INTO parse_failure VALUES(?,?)", [(url, f) for f in failures])

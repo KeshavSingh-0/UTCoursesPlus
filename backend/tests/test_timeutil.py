@@ -23,9 +23,7 @@ def test_bad_days(bad):
         parse_days(bad)
 
 
-@pytest.mark.parametrize(
-    "bad", ["bad time", "9:00 a.m.", "10:00 a.m.-9:00 a.m.", "13:00 p.m.-14:00 p.m."]
-)
+@pytest.mark.parametrize("bad", ["bad time", "9:00 a.m.", "10:00 a.m.-9:00 a.m.", "13:00 p.m.-14:00 p.m."])
 def test_bad_ranges(bad):
     with pytest.raises(ValueError):
         parse_time_range(bad)

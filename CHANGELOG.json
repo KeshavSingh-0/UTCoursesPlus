@@ -188,6 +188,62 @@
         "37 sections without times are real: 24 Internet sections and 13 face-to-face research/reading courses with no meeting time. 68 sections have an empty instructor cell (staff/TBA). The schedule generator in Stage 5 must handle sections with no meeting time and no instructor.",
         "No non-Core flags (writing, ethics, global cultures, etc.) appear in the C S results, so they may only exist on each section's detail page. A saved detail page is needed to confirm."
       ]
+    },
+    {
+      "commit_message": "feat: preferences, language-model tuning, ratings and grades import, shrinkage estimates",
+      "summary": "Stages 3 and 5 foundations: PreferenceConfig with validation and undo history, natural-language tuning that only edits the config, optional signal imports, and empirical-Bayes difficulty estimates with intervals.",
+      "files": [
+        "backend/src/utcoursesplus/{prefs,llm,nlpref,signals}.py",
+        "backend/tests/{test_prefs,test_signals}.py",
+        "backend/pyproject.toml",
+        "tools/changelog.py"
+      ],
+      "changes": [
+        {
+          "what": "PreferenceConfig",
+          "how": "Pydantic models with extra='forbid'. Hard constraints (times, days off, gaps, walking, credit range, exclusions, required courses) and eight soft weights that are renormalized to sum to 1 by a model validator; all-zero weights fall back to defaults. History is a table whose newest row is current; undo deletes it."
+        },
+        {
+          "what": "Natural-language tuning",
+          "how": "nlpref.propose sends the request plus the current config to the model through client.messages.parse with a Pydantic output schema. required_courses is removed from what the model sees and cannot be returned (HardCore vs HardConstraints). Python then validates, computes the real diff and attaches the user's phrase and the model's rationale per changed path. A clarifying question or tradeoff note is passed through instead of silently picking. Nothing is applied until the API's apply call."
+        },
+        {
+          "what": "Ratings and grades import",
+          "how": "CSV importers validate every row and report rejected lines. Ratings are never scraped: RateMyProfessors' terms (section 6) prohibit automated access, so only CSV import and a link-out are supported. Grade imports store a source name and licence note per file."
+        },
+        {
+          "what": "Shrinkage estimates",
+          "how": "signals.py works on a z scale: each source adds precision n*tau^2/sigma^2, posterior mean is the precision-weighted z shrunk toward the department prior, and the interval is +/-1.96 sd mapped through the normal CDF to a 0-1 ease. Missing sources are dropped and the blend weights renormalized; rank values subtract half the interval width so low-confidence courses rank lower while staying visible."
+        },
+        {
+          "what": "Linter config",
+          "how": "pyproject sets line length 110 and ignores RUF012/UP046/UP047, which flag Pydantic's literal defaults and generic helper signatures."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "A test expected 3 ratings of difficulty 4.5 to stay above 0.2 ease",
+          "cause": "The test assumed far-from-prior ratings are discounted more than they are; with a department prior near 2.0 the evidence really is strong",
+          "fix": "Rewrote the test to compare the same rating at n=3 and n=300: the small sample must be pulled toward the prior and have a much wider interval"
+        },
+        {
+          "symptom": "Rank values could go negative",
+          "cause": "mean minus half-width is unbounded below",
+          "fix": "Clip rank values to [0, 1]"
+        },
+        {
+          "symptom": "Ambiguity guard in professor matching was always true",
+          "cause": "Compared the set of distinct instructors with a list built from the same distinct keys",
+          "fix": "Match only keys that map to exactly one imported person; two people sharing last name and first initial are skipped"
+        }
+      ],
+      "notes": [
+        "The model identifier defaults to claude-opus-5-5 and can be changed with the UTCP_MODEL environment variable. Refusals are reported as an error; server-side fallbacks are not enabled.",
+        "The spread constants (GPA_TAU, RMP_*_TAU and so on) are judgment values documented in signals.py, not fitted to UT data.",
+        "UT's official grade dashboard is at reports.utexas.edu/spotlight-data/ut-course-grade-distributions; licensing for reuse of exported data is not stated there, so the importer records a licence note per file."
+      ],
+      "id": 5,
+      "date": "2026-10-08"
     }
   ]
 }

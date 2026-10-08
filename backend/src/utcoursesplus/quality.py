@@ -9,9 +9,7 @@ def report(con: sqlite3.Connection) -> dict:
     r = {
         "sections": one("SELECT COUNT(*) FROM section"),
         "courses": one("SELECT COUNT(*) FROM course"),
-        "distinct_course_numbers": one(
-            "SELECT COUNT(DISTINCT dept||' '||number) FROM course"
-        ),
+        "distinct_course_numbers": one("SELECT COUNT(DISTINCT dept||' '||number) FROM course"),
         "departments": one("SELECT COUNT(DISTINCT dept) FROM course"),
         "instructors": one("SELECT COUNT(*) FROM instructor"),
         "pages_logged": one("SELECT COUNT(*) FROM crawl_log"),
@@ -26,17 +24,9 @@ def report(con: sqlite3.Connection) -> dict:
             "WHERE i.unique_no=s.unique_no AND i.term=s.term)"
         ),
         "sections_no_level": one("SELECT COUNT(*) FROM section WHERE level IS NULL"),
-        "sections_with_core_tag": one(
-            "SELECT COUNT(DISTINCT unique_no) FROM section_tag WHERE kind='core'"
-        ),
-        "by_status": {
-            row[0]: row[1]
-            for row in q("SELECT status, COUNT(*) FROM section GROUP BY status")
-        },
-        "by_source": {
-            row[0]: row[1]
-            for row in q("SELECT source, COUNT(*) FROM section GROUP BY source")
-        },
+        "sections_with_core_tag": one("SELECT COUNT(DISTINCT unique_no) FROM section_tag WHERE kind='core'"),
+        "by_status": {row[0]: row[1] for row in q("SELECT status, COUNT(*) FROM section GROUP BY status")},
+        "by_source": {row[0]: row[1] for row in q("SELECT source, COUNT(*) FROM section GROUP BY source")},
         "by_core_area": {
             row[0]: row[1]
             for row in q(
@@ -73,20 +63,13 @@ def report(con: sqlite3.Connection) -> dict:
             "WHERE kind='flag' GROUP BY label, title"
         )
     }
-    r["empty_page_urls"] = [
-        row[0] for row in q("SELECT url FROM crawl_log WHERE n_sections=0 LIMIT 20")
-    ]
-    r["by_mode"] = {
-        str(row[0]): row[1]
-        for row in q("SELECT mode, COUNT(*) FROM section GROUP BY mode")
-    }
+    r["empty_page_urls"] = [row[0] for row in q("SELECT url FROM crawl_log WHERE n_sections=0 LIMIT 20")]
+    r["by_mode"] = {str(row[0]): row[1] for row in q("SELECT mode, COUNT(*) FROM section GROUP BY mode")}
     r["unparseable_pages"] = [
-        dict(x)
-        for x in q("SELECT url, n_failures FROM crawl_log WHERE n_failures>0 LIMIT 20")
+        dict(x) for x in q("SELECT url, n_failures FROM crawl_log WHERE n_failures>0 LIMIT 20")
     ]
     r["failure_samples"] = [
-        f"{x[0][-60:]}: {x[1]}"
-        for x in q("SELECT url, detail FROM parse_failure LIMIT 10")
+        f"{x[0][-60:]}: {x[1]}" for x in q("SELECT url, detail FROM parse_failure LIMIT 10")
     ]
     return r
 

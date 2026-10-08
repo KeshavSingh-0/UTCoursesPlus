@@ -87,9 +87,7 @@ class Fetcher:
         body, meta = self._paths(url)
         if body.exists() and meta.exists():
             m = json.loads(meta.read_text())
-            return Fetched(
-                url, body.read_text(), datetime.fromisoformat(m["fetched_at"]), True
-            )
+            return Fetched(url, body.read_text(), datetime.fromisoformat(m["fetched_at"]), True)
         backoff = 5.0
         for attempt in range(4):
             self._throttle()
@@ -104,9 +102,7 @@ class Fetcher:
             if r.status_code in (301, 302, 303, 307, 308):
                 loc = r.headers.get("location", "")
                 if "login" in loc or "SAML" in loc:
-                    raise SessionExpired(
-                        "Redirected to UT login. Run: uv run utcoursesplus login"
-                    )
+                    raise SessionExpired("Redirected to UT login. Run: uv run utcoursesplus login")
                 raise BlockedError(f"Unexpected redirect to {loc[:80]} for {url}")
             if r.status_code in (403, 429):
                 raise BlockedError(f"HTTP {r.status_code} for {url}")
@@ -122,15 +118,9 @@ class Fetcher:
             if "captcha" in low or "access denied" in low or "unusual traffic" in low:
                 raise BlockedError(f"Block or CAPTCHA page returned for {url}")
             if "samlrequest" in low:
-                raise SessionExpired(
-                    "Login page returned. Run: uv run utcoursesplus login"
-                )
+                raise SessionExpired("Login page returned. Run: uv run utcoursesplus login")
             now = datetime.now(UTC)
             body.write_text(text)
-            meta.write_text(
-                json.dumps(
-                    {"url": url, "fetched_at": now.isoformat(), "host": SCHEDULE_HOST}
-                )
-            )
+            meta.write_text(json.dumps({"url": url, "fetched_at": now.isoformat(), "host": SCHEDULE_HOST}))
             return Fetched(url, text, now, False)
         raise BlockedError(f"Gave up on {url}")

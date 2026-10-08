@@ -7,9 +7,7 @@ from utcoursesplus.fetch import BlockedError, Fetcher, SessionExpired
 def make(handler, tmp_path, sleeps=None):
     sleeps = sleeps if sleeps is not None else []
     t = {"now": 0.0}
-    client = httpx.Client(
-        transport=httpx.MockTransport(handler), follow_redirects=False
-    )
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
     f = Fetcher(
         cache_dir=tmp_path,
         client=client,
@@ -39,9 +37,7 @@ def test_block_stops(tmp_path, code):
 
 
 def test_captcha_stops_and_is_not_cached(tmp_path):
-    f, _ = make(
-        lambda r: httpx.Response(200, text="Please solve this CAPTCHA"), tmp_path
-    )
+    f, _ = make(lambda r: httpx.Response(200, text="Please solve this CAPTCHA"), tmp_path)
     with pytest.raises(BlockedError):
         f.get("https://x/a")
     assert not list(tmp_path.iterdir())
@@ -49,9 +45,7 @@ def test_captcha_stops_and_is_not_cached(tmp_path):
 
 def test_login_redirect_means_session_expired(tmp_path):
     f, _ = make(
-        lambda r: httpx.Response(
-            302, headers={"location": "https://enterprise.login.utexas.edu/idp/x"}
-        ),
+        lambda r: httpx.Response(302, headers={"location": "https://enterprise.login.utexas.edu/idp/x"}),
         tmp_path,
     )
     with pytest.raises(SessionExpired):

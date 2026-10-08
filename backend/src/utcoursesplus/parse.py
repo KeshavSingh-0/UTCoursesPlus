@@ -67,21 +67,15 @@ def _parse_tags(td: Node | None, hint_core_code: str | None) -> list[Tag]:
             elif "core curriculum requirement" in title.lower():
                 tags.append(Tag(kind="core", code="unmapped", label=label, title=title))
             else:
-                tags.append(
-                    Tag(kind="flag", code=css or label, label=label, title=title)
-                )
-    if hint_core_code and not any(
-        t.kind == "core" and t.code == hint_core_code for t in tags
-    ):
+                tags.append(Tag(kind="flag", code=css or label, label=label, title=title))
+    if hint_core_code and not any(t.kind == "core" and t.code == hint_core_code for t in tags):
         area = next((a for a in CORE_AREAS if a.code == hint_core_code), None)
         if area:
             tags.append(Tag(kind="core", code=area.code, label=area.name))
     return tags
 
 
-def _parse_meetings(
-    days: list[str], hours: list[str], rooms: list[str]
-) -> list[Meeting]:
+def _parse_meetings(days: list[str], hours: list[str], rooms: list[str]) -> list[Meeting]:
     n = max(len(days), len(hours), len(rooms), 0)
     out = []
     for i in range(n):
@@ -148,10 +142,7 @@ def parse_results(
                 credit_hours=int(num[0]) if num[0].isdigit() else None,
             )
             continue
-        cells = {
-            (td.attributes.get("data-th") or "").lower(): td
-            for td in tr.css("td[data-th]")
-        }
+        cells = {(td.attributes.get("data-th") or "").lower(): td for td in tr.css("td[data-th]")}
         uq = cells.get("unique")
         if uq is None:
             continue
@@ -159,12 +150,8 @@ def parse_results(
         try:
             if header is None:
                 raise ValueError("section row without a parseable course header")
-            status, reserved = _parse_status(
-                _clean(cells["status"].text()) if "status" in cells else ""
-            )
-            instructors = [
-                Instructor(name=s) for s in _spans(cells.get("instructor")) if s
-            ]
+            status, reserved = _parse_status(_clean(cells["status"].text()) if "status" in cells else "")
+            instructors = [Instructor(name=s) for s in _spans(cells.get("instructor")) if s]
             tag_td = cells.get("core") or cells.get("flags")
             mode_td = cells.get("instruction mode")
             page.sections.append(
@@ -180,9 +167,7 @@ def parse_results(
                     instructors=instructors,
                     mode=_clean(mode_td.text()) if mode_td is not None else None,
                     status=status,
-                    status_raw=_clean(cells["status"].text())
-                    if "status" in cells
-                    else "",
+                    status_raw=_clean(cells["status"].text()) if "status" in cells else "",
                     reserved=reserved,
                     level=level,
                     tags=_parse_tags(tag_td, hint_core_code),

@@ -34,18 +34,12 @@ def field_url(dept: str, level: str) -> str:
     return (
         RESULTS_URL
         + "?"
-        + urlencode(
-            {"ccyys": TERM, "search_type_main": "FIELD", "fos_fl": dept, "level": level}
-        )
+        + urlencode({"ccyys": TERM, "search_type_main": "FIELD", "fos_fl": dept, "level": level})
     )
 
 
 def core_url(core_code: str) -> str:
-    return (
-        RESULTS_URL
-        + "?"
-        + urlencode({"ccyys": TERM, "search_type_main": "CORE", "core_code": core_code})
-    )
+    return RESULTS_URL + "?" + urlencode({"ccyys": TERM, "search_type_main": "CORE", "core_code": core_code})
 
 
 def plan(departments: list[tuple[str, str]]) -> list[str]:

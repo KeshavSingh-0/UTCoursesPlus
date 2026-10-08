@@ -12,7 +12,9 @@ from utcoursesplus.models import Section
 from utcoursesplus.parse import parse_results
 
 FIX = Path(__file__).parent / "fixtures" / "results_sample.html"
-URL = "https://utdirect.utexas.edu/apps/registrar/course_schedule/20272/results/?ccyys=20272&fos_fl=C+S&level=L"
+URL = (
+    "https://utdirect.utexas.edu/apps/registrar/course_schedule/20272/results/?ccyys=20272&fos_fl=C+S&level=L"
+)
 NOW = datetime(2026, 10, 8, tzinfo=UTC)
 
 
@@ -24,9 +26,7 @@ def test_parse_sections_and_failures():
     p = parsed()
     assert [s.unique for s in p.sections] == ["10001", "10003"]
     assert len(p.failures) == 1 and "10002" in p.failures[0]
-    assert p.next_url.endswith("next_unique=99999") and p.next_url.startswith(
-        "https://utdirect"
-    )
+    assert p.next_url.endswith("next_unique=99999") and p.next_url.startswith("https://utdirect")
 
 
 def test_first_section_fields():
@@ -44,15 +44,11 @@ def test_db_roundtrip_and_tag_union():
     con = connect(":memory:")
     s = parsed().sections[0]
     upsert_section(con, s)
-    other = s.model_copy(
-        update={"tags": [], "level": None}
-    )  # e.g. seen again by a core search
+    other = s.model_copy(update={"tags": [], "level": None})  # e.g. seen again by a core search
     upsert_section(con, other)
     n_tags = con.execute("SELECT COUNT(*) FROM section_tag").fetchone()[0]
     assert n_tags == 2
-    assert (
-        con.execute("SELECT level FROM section").fetchone()[0] == "L"
-    )  # level not erased
+    assert con.execute("SELECT level FROM section").fetchone()[0] == "L"  # level not erased
 
 
 def test_conflicting_course_is_recorded():
@@ -93,9 +89,7 @@ def test_plan_covers_every_department_level_and_core_area():
     depts = [("C S", "Computer Science"), ("M", "Mathematics")]
     urls = crawl.plan(depts)
     assert len(urls) == 10 + 2 * 3
-    assert any("core_code=093" in u for u in urls) and any(
-        "fos_fl=M&level=G" in u for u in urls
-    )
+    assert any("core_code=093" in u for u in urls) and any("fos_fl=M&level=G" in u for u in urls)
 
 
 def test_parse_departments_from_homepage_sample():
@@ -141,9 +135,7 @@ def test_reparse_cache_rebuilds_without_requests(tmp_path):
     from utcoursesplus.rebuild import reparse_cache
 
     (tmp_path / "a.html").write_text(FIX.read_text())
-    (tmp_path / "a.json").write_text(
-        json.dumps({"url": URL, "fetched_at": NOW.isoformat()})
-    )
+    (tmp_path / "a.json").write_text(json.dumps({"url": URL, "fetched_at": NOW.isoformat()}))
     con = connect(":memory:")
     assert reparse_cache(con, tmp_path, progress=lambda *_: None) == 2
     assert reparse_cache(con, tmp_path, progress=lambda *_: None) == 2  # idempotent

@@ -14,9 +14,7 @@ from .models import Section
 from .parse import parse_results
 
 
-def import_html_files(
-    con: sqlite3.Connection, paths: list[Path], progress=print
-) -> int:
+def import_html_files(con: sqlite3.Connection, paths: list[Path], progress=print) -> int:
     """Parse results pages you saved from your own browser (File > Save Page As). The page's own
     URL is not stored in a saved file, so the core code is taken from its hidden form fields."""
     total = 0
@@ -51,9 +49,7 @@ def import_html_files(
                 len(page.sections),
                 page.failures,
             )
-        progress(
-            f"{p.name}: {len(page.sections)} sections, {len(page.failures)} parse failures"
-        )
+        progress(f"{p.name}: {len(page.sections)} sections, {len(page.failures)} parse failures")
         total += len(page.sections)
     return total
 
