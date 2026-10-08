@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS section_instructor(
   unique_no TEXT NOT NULL, term TEXT NOT NULL, name TEXT NOT NULL REFERENCES instructor(name),
   PRIMARY KEY(unique_no, term, name));
 CREATE TABLE IF NOT EXISTS section_tag(
-  unique_no TEXT NOT NULL, term TEXT NOT NULL, kind TEXT NOT NULL, code TEXT NOT NULL, label TEXT NOT NULL,
-  PRIMARY KEY(unique_no, term, kind, code));
+  unique_no TEXT NOT NULL, term TEXT NOT NULL, kind TEXT NOT NULL, code TEXT NOT NULL, label TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(unique_no, term, kind, code, label));
 CREATE TABLE IF NOT EXISTS crawl_log(
   url TEXT PRIMARY KEY, fetched_at TEXT NOT NULL, from_cache INTEGER NOT NULL, source TEXT NOT NULL,
   n_sections INTEGER NOT NULL, n_failures INTEGER NOT NULL);
@@ -47,6 +47,12 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(section_tag)")}
+    if (
+        "title" not in cols
+    ):  # database created by an earlier version: derived data, rebuild it
+        con.execute("DROP TABLE section_tag")
+        con.executescript(SCHEMA)
     con.executemany(
         "INSERT OR IGNORE INTO core_area VALUES(?,?)",
         [(a.code, a.name) for a in CORE_AREAS],
@@ -116,8 +122,8 @@ def upsert_section(con: sqlite3.Connection, s: Section) -> None:
         )
     for t in s.tags:
         con.execute(
-            "INSERT OR IGNORE INTO section_tag VALUES(?,?,?,?,?)",
-            (s.unique, s.term, t.kind, t.code, t.label),
+            "INSERT OR IGNORE INTO section_tag VALUES(?,?,?,?,?,?)",
+            (s.unique, s.term, t.kind, t.code, t.label, t.title),
         )
 
 

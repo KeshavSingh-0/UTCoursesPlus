@@ -109,6 +109,54 @@
       "notes": [
         "Playwright cannot be run in this cloud container, so the new loop is covered by unit tests of the detection function only, not an end-to-end browser run."
       ]
+    },
+    {
+      "id": 3,
+      "date": "2026-10-08",
+      "commit_message": "fix: keep unrecognized Core tags visible; add reparse and diagnose commands",
+      "summary": "The first real crawl (C S + Mathematics core) showed 237 sections with a Core tag but only 102 mapped to a named Core area, no flags at all, 37 sections without times and 68 without instructors. Added tools to rebuild from cached pages and to dump the raw rows behind the anomalies.",
+      "files": [
+        "backend/src/utcoursesplus/{models,parse,db,quality,rebuild,cli}.py",
+        "backend/tests/test_parse_db.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Tag classification",
+          "how": "Labels are matched to the 10 Core areas after normalizing case, punctuation and '&' vs 'and'. A tag whose tooltip says 'core curriculum requirement' but is not one of the 10 is stored as kind=core, code='unmapped'. Everything else is a flag. The tooltip text is now stored in section_tag.title."
+        },
+        {
+          "what": "Continuation rows (unverified layout)",
+          "how": "A table row with no unique number but with days, hours or instructors is attached to the section above it as an extra meeting or instructor. This guards against multi-meeting sections being truncated; it is based on an assumption and will be confirmed or removed from the diagnose output."
+        },
+        {
+          "what": "reparse command",
+          "how": "rebuild.reparse_cache deletes sections that came from the authenticated crawl and re-parses every page in data/cache, using the URL's level and core_code. It makes no network requests."
+        },
+        {
+          "what": "diagnose command",
+          "how": "rebuild.diagnose writes up to 3 raw HTML rows each for sections with no times, no instructors, rows with no unique number, and each unusual tag label to data/diagnose.txt."
+        },
+        {
+          "what": "Quality report",
+          "how": "Added missing_times_by_mode, no_instructor_by_status, unmapped_core_labels and flag_titles; removed the old flags counter."
+        },
+        {
+          "what": "Schema migration",
+          "how": "connect() drops and recreates section_tag when it lacks the title column; the table is derived data and reparse restores it."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "sections_with_core_tag was 237 but the named Core areas totalled 102, and flags was empty",
+          "cause": "Any tag with 'core curriculum requirement' in its tooltip and a label that did not exactly match my area names was stored as a core tag under its CSS class, so it was counted nowhere and hidden",
+          "fix": "Unrecognized core-titled tags are stored as code 'unmapped' and listed by label in the quality report; label matching is now normalized"
+        }
+      ],
+      "notes": [
+        "Cause of the 37 sections without times and 68 without instructors is not yet known. They may be asynchronous online sections, staff-taught sections, or multi-row sections. Run diagnose and send data/diagnose.txt to confirm.",
+        "28 tests pass. Not run against the user's cached pages, which live only on their machine."
+      ]
     }
   ]
 }

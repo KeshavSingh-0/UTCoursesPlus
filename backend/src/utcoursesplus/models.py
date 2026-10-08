@@ -25,8 +25,9 @@ class Tag(Strict):
     """A flag shown on a section: a core curriculum area, or another flag (writing, ethics...)."""
 
     kind: Literal["core", "flag"]
-    code: str  # core area code like '090' for kind=core, raw css class for kind=flag
+    code: str  # core area code like '090'; 'unmapped' for a core-titled tag not in CORE_AREAS; css class for flags
     label: str
+    title: str = ""  # tooltip text on the registrar page, kept for diagnosis
 
 
 class Instructor(Strict):

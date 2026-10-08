@@ -56,6 +56,12 @@ def main(argv: list[str] | None = None) -> int:
     j = sub.add_parser("import-json", help="load sections from a JSON file")
     j.add_argument("file", type=Path)
     sub.add_parser("quality", help="data-quality report")
+    sub.add_parser(
+        "reparse", help="rebuild crawled sections from cached pages (no requests)"
+    )
+    sub.add_parser(
+        "diagnose", help="write raw example rows of anomalies to data/diagnose.txt"
+    )
     sub.add_parser("samples", help="print 5 random section rows")
     a = ap.parse_args(argv)
 
@@ -75,6 +81,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Imported {n} sections.")
     elif a.cmd == "import-json":
         print(f"Imported {import_json(con, a.file)} sections.")
+    elif a.cmd == "reparse":
+        from .rebuild import reparse_cache
+
+        reparse_cache(con)
+        print_report(report(con))
+    elif a.cmd == "diagnose":
+        from .rebuild import diagnose
+
+        print(f"Wrote {diagnose()}")
     elif a.cmd == "quality":
         print_report(report(con))
     elif a.cmd == "samples":

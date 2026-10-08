@@ -45,3 +45,8 @@ Check the data:
 
     uv run utcoursesplus quality
     uv run utcoursesplus samples
+
+After a parser update, rebuild from already-fetched pages (no requests):
+
+    uv run utcoursesplus reparse
+    uv run utcoursesplus diagnose     # writes data/diagnose.txt with raw example rows

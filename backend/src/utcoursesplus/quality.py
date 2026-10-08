@@ -44,12 +44,34 @@ def report(con: sqlite3.Connection) -> dict:
                 "ON t.kind='core' AND t.code=a.code GROUP BY a.code ORDER BY a.name"
             )
         },
-        "flags": {
-            row[0]: row[1]
-            for row in q(
-                "SELECT label, COUNT(DISTINCT unique_no) FROM section_tag WHERE kind='flag' GROUP BY label"
-            )
-        },
+    }
+    r["missing_times_by_mode"] = {
+        str(row[0]): row[1]
+        for row in q(
+            "SELECT mode, COUNT(*) FROM section s WHERE NOT EXISTS (SELECT 1 FROM meeting m "
+            "WHERE m.unique_no=s.unique_no AND m.term=s.term AND m.start_min IS NOT NULL) GROUP BY mode"
+        )
+    }
+    r["no_instructor_by_status"] = {
+        row[0]: row[1]
+        for row in q(
+            "SELECT status, COUNT(*) FROM section s WHERE NOT EXISTS (SELECT 1 FROM section_instructor i "
+            "WHERE i.unique_no=s.unique_no AND i.term=s.term) GROUP BY status"
+        )
+    }
+    r["unmapped_core_labels"] = {
+        f"{row[0]}  [{row[1]}]": row[2]
+        for row in q(
+            "SELECT label, title, COUNT(DISTINCT unique_no) FROM section_tag "
+            "WHERE kind='core' AND code='unmapped' GROUP BY label, title"
+        )
+    }
+    r["flag_titles"] = {
+        f"{row[0]}  [{row[1]}]": row[2]
+        for row in q(
+            "SELECT label, title, COUNT(DISTINCT unique_no) FROM section_tag "
+            "WHERE kind='flag' GROUP BY label, title"
+        )
     }
     r["unparseable_pages"] = [
         dict(x)

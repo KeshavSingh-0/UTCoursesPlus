@@ -12,7 +12,6 @@ from .models import CORE_AREAS, Course, Instructor, Level, Meeting, Section, Tag
 from .timeutil import parse_days, parse_time_range
 
 _HEADER_RE = re.compile(r"^(?P<dept>.+?)\s+(?P<num>\d[0-9A-Z]*)\s+(?P<title>.+)$")
-_CORE_BY_NAME = {a.name.lower(): a.code for a in CORE_AREAS}
 
 
 @dataclass
@@ -43,18 +42,34 @@ def _parse_status(raw: str) -> tuple[str, bool]:
     return "unknown", reserved
 
 
+def _norm(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", label.lower().replace("&", " and ")).strip()
+
+
+_CORE_BY_NORM = {_norm(a.name): a.code for a in CORE_AREAS}
+
+
 def _parse_tags(td: Node | None, hint_core_code: str | None) -> list[Tag]:
+    """Core areas map to their registrar code. A tag the page titles a core curriculum requirement
+    but that is not one of the 10 known areas is kept as core/'unmapped' so the quality report
+    shows its label instead of silently dropping or mislabeling it."""
     tags: list[Tag] = []
     if td is not None:
         for li in td.css("ul li"):
             label = _clean(li.text())
-            title = li.attributes.get("title") or ""
+            title = _clean(li.attributes.get("title") or "")
             css = (li.attributes.get("class") or "").strip()
-            code = _CORE_BY_NAME.get(label.lower())
-            if code or "core curriculum requirement" in title:
-                tags.append(Tag(kind="core", code=code or css or label, label=label))
-            elif label:
-                tags.append(Tag(kind="flag", code=css or label, label=label))
+            if not label:
+                continue
+            code = _CORE_BY_NORM.get(_norm(label))
+            if code:
+                tags.append(Tag(kind="core", code=code, label=label, title=title))
+            elif "core curriculum requirement" in title.lower():
+                tags.append(Tag(kind="core", code="unmapped", label=label, title=title))
+            else:
+                tags.append(
+                    Tag(kind="flag", code=css or label, label=label, title=title)
+                )
     if hint_core_code and not any(
         t.kind == "core" and t.code == hint_core_code for t in tags
     ):
@@ -62,6 +77,27 @@ def _parse_tags(td: Node | None, hint_core_code: str | None) -> list[Tag]:
         if area:
             tags.append(Tag(kind="core", code=area.code, label=area.name))
     return tags
+
+
+def _attach_continuation(page: "ParsedPage", cells: dict, header_text: str) -> None:
+    """A row with no unique number that carries days/hours/instructors adds a meeting or an
+    instructor to the section above it (assumed layout for multi-meeting sections; unverified)."""
+    if not page.sections or page.sections[-1].course.title not in header_text:
+        return
+    last = page.sections[-1]
+    try:
+        extra = _parse_meetings(
+            _spans(cells.get("days")),
+            _spans(cells.get("hour")),
+            _spans(cells.get("room")),
+        )
+        names = [Instructor(name=n) for n in _spans(cells.get("instructor")) if n]
+    except ValueError as e:
+        page.failures.append(f"continuation row for {last.unique}: {e}")
+        return
+    known = {i.name for i in last.instructors}
+    last.meetings.extend(extra)
+    last.instructors.extend(i for i in names if i.name not in known)
 
 
 def _parse_meetings(
@@ -138,7 +174,8 @@ def parse_results(
             for td in tr.css("td[data-th]")
         }
         uq = cells.get("unique")
-        if uq is None:
+        if uq is None or not _clean(uq.text()):
+            _attach_continuation(page, cells, header_text)
             continue
         unique = _clean(uq.text())
         try:

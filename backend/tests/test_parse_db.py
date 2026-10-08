@@ -104,3 +104,52 @@ def test_parse_departments_from_homepage_sample():
         pytest.skip("local sample not present")
     d = crawl.parse_departments(home.read_text())
     assert len(d) == 229 and ("C S", "Computer Science") in d
+
+
+def test_unknown_core_title_is_kept_as_unmapped_and_flags_keep_titles():
+    from selectolax.lexbor import LexborHTMLParser
+
+    from utcoursesplus.parse import _parse_tags
+
+    td = LexborHTMLParser(
+        '<table><tr><td><ul class="core">'
+        '<li class="X" title="Foo Bar core curriculum requirement">Foo Bar</li>'
+        '<li class="WR" title="Writing flag">Writing</li>'
+        '<li class="N" title="x">Natural Science &amp; Technology, Part I</li>'
+        "</ul></td></tr></table>"
+    ).css_first("td")
+    tags = {(t.kind, t.code, t.label) for t in _parse_tags(td, None)}
+    assert ("core", "unmapped", "Foo Bar") in tags
+    assert ("flag", "WR", "Writing") in tags
+    assert ("core", "030", "Natural Science & Technology, Part I") in tags
+
+
+def test_continuation_row_adds_meeting_and_instructor():
+    html = """<table class="results"><tbody>
+    <tr><td class="course_header"><h2>C S  429 SOFTWARE ENGINEERING</h2></td></tr>
+    <tr><td data-th="Unique"><a>11111</a></td><td data-th="Days"><span>MW</span></td>
+    <td data-th="Hour"><span>9:00 a.m.-10:00 a.m.</span></td><td data-th="Room"><span>GDC 1.304</span></td>
+    <td data-th="Instructor"><span>A, B</span></td><td data-th="Status">open</td></tr>
+    <tr><td data-th="Unique"></td><td data-th="Days"><span>F</span></td>
+    <td data-th="Hour"><span>9:00 a.m.-10:00 a.m.</span></td><td data-th="Room"><span>GDC 1.304</span></td>
+    <td data-th="Instructor"><span>C, D</span></td></tr></tbody></table>"""
+    p = parse_results(html, URL, NOW, term="20272")
+    assert len(p.sections) == 1
+    assert [m.days for m in p.sections[0].meetings] == [["M", "W"], ["F"]]
+    assert [i.name for i in p.sections[0].instructors] == ["A, B", "C, D"]
+
+
+def test_reparse_cache_rebuilds_without_requests(tmp_path):
+    import json
+
+    from utcoursesplus.rebuild import reparse_cache
+
+    (tmp_path / "a.html").write_text(FIX.read_text())
+    (tmp_path / "a.json").write_text(
+        json.dumps({"url": URL, "fetched_at": NOW.isoformat()})
+    )
+    con = connect(":memory:")
+    assert reparse_cache(con, tmp_path, progress=lambda *_: None) == 2
+    assert reparse_cache(con, tmp_path, progress=lambda *_: None) == 2  # idempotent
+    assert con.execute("SELECT COUNT(*) FROM section").fetchone()[0] == 2
+    assert con.execute("SELECT level FROM section LIMIT 1").fetchone()[0] == "L"
