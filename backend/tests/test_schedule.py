@@ -252,7 +252,7 @@ def test_explanation_names_features_and_sections():
         {"hard": {"credit_min": 0}, "time_bias": 1, "weights": {"time_of_day": 1}}
     )
     res = run([early, late], Requirements(required_courses=["C S 312"]), cfg)
-    lines = S.explain_vs(res.schedules[0], res.schedules[1], S.Scorer(cfg, idx()).weights())
+    lines = S.explain_vs(res.pool[0], res.pool[1], S.Scorer(cfg, idx()).weights())
     assert any("Time-of-day fit is higher" in ln for ln in lines) and any(
         "Sections that differ" in ln for ln in lines
     )
@@ -327,3 +327,27 @@ def test_generation_is_fast_enough_on_a_realistic_pool(n):
     t = time.time()
     res = S.generate(catalog(secs), req, PreferenceConfig.model_validate({"hard": {"credit_min": 0}}), idx())
     assert res.schedules and time.time() - t < 20
+
+
+def test_requirements_that_exceed_the_credit_maximum_say_so():
+    secs = [mk(1, "C S 312"), mk(2, "M 408C", days=("T", "TH"), credits=4)]
+    res = run(
+        secs,
+        Requirements(required_courses=["C S 312", "M 408C"]),
+        PreferenceConfig.model_validate({"hard": {"credit_min": 0, "credit_max": 6}}),
+    )
+    assert not res.schedules and "at least 7 credit hours" in res.problems[0]
+
+
+def test_ranked_list_has_one_schedule_per_course_set_but_pool_keeps_alternatives():
+    secs = [
+        mk(1, "C S 312", days=("M", "W"), start=540, end=600),
+        mk(2, "C S 312", days=("M", "W"), start=545, end=605),
+        mk(3, "M 408C", days=("T", "TH"), start=540, end=600),
+    ]
+    res = run(
+        secs,
+        Requirements(required_courses=["C S 312", "M 408C"]),
+        PreferenceConfig.model_validate({"hard": {"credit_min": 0}}),
+    )
+    assert len(res.schedules) == 1 and len(res.pool) == 2

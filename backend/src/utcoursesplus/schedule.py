@@ -352,6 +352,21 @@ def generate(
     if any(not sl.candidates for sl in slots):
         return Result([], [], problems, False, 0, notes)
 
+    min_total = sum(min(x.credits for x in sl.candidates) for sl in slots)
+    if min_total > cfg.hard.credit_max:
+        return Result(
+            [],
+            [],
+            [
+                (
+                    f"Your requirements need at least {min_total} credit hours ({len(slots)} courses), but your maximum is "
+                    f"{cfg.hard.credit_max}. Raise the credit maximum on the Preferences screen or remove a requirement."
+                )
+            ],
+            False,
+            0,
+            notes,
+        )
     order = sorted(slots, key=lambda sl: len(sl.candidates))
     w = scorer.weights()
     sec_w = sum(w[f] for f in SECTION_FEATURES)
@@ -435,7 +450,15 @@ def generate(
         notes.append(
             "The search hit its time limit; results are the best found, not guaranteed best overall."
         )
-    return Result(uniq[:k], uniq, problems, state["trunc"], state["nodes"], notes)
+    # The ranked list shows each distinct set of courses once, at its best section choice; the
+    # section-level alternatives stay in the pool and feed the backup schedules.
+    ranked, seen_courses = [], set()
+    for sch in uniq:
+        courses = frozenset(s.code for s in sch.sections)
+        if courses not in seen_courses:
+            seen_courses.add(courses)
+            ranked.append(sch)
+    return Result(ranked[:k], uniq, problems, state["trunc"], state["nodes"], notes)
 
 
 # ----------------------------------------------------------------------------- explanations
@@ -462,6 +485,10 @@ def explain_vs(a: Schedule, b: Schedule | None, weights: dict[str, float]) -> li
             f"{FEATURE_LABELS[f]} is {better} ({va:.2f} against {vb:.2f}), worth {da * 100:+.1f} points of utility "
             f"at your weight of {weights.get(f, 0) * 100:.0f}%."
         )
+    if not lines:
+        lines.append(
+            "The two schedules score within 0.4 points of each other, so no single factor separates them."
+        )
     only_a = [s for s in a.sections if s.unique not in {x.unique for x in b.sections}]
     only_b = [s for s in b.sections if s.unique not in {x.unique for x in a.sections}]
     if only_a or only_b:
@@ -472,7 +499,7 @@ def explain_vs(a: Schedule, b: Schedule | None, weights: dict[str, float]) -> li
             + (", ".join(f"{s.code} ({s.unique})" for s in only_b) or "nothing")
             + "."
         )
-    return lines or ["The two schedules score within 0.4 points of each other."]
+    return lines
 
 
 def describe_change(old: Schedule | None, new: Schedule | None) -> list[str]:

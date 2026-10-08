@@ -310,6 +310,73 @@
       ],
       "id": 6,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: web interface, schedule list de-duplication, clearer credit-limit message",
+      "summary": "Stage 6: Vite + React + TypeScript interface with six screens, a hand-built weekly calendar, virtualized course table and a restrained design system; fixes found while running it against a synthetic database.",
+      "files": [
+        "frontend/**",
+        "backend/src/utcoursesplus/{schedule,config}.py",
+        "backend/tests/{test_schedule,demo_db}.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Screens",
+          "how": "Requirements (Core area checkboxes, required courses, per-area course options sorted easiest first, audit paste with review table), Courses and sections (virtualized with @tanstack/react-virtual, arrow-key navigation, detail panel with RMP link-out and source), Preferences (sliders, hard constraints, plain-English box with diff, phrases, reasons, apply and undo), Ranked schedules (calendar, why-this-ranks, score components, backups), Registration plan (hand-run checklist), Data sources (origins, missing signals, importers, syllabus form)."
+        },
+        {
+          "what": "Design system",
+          "how": "CSS variable tokens: one primary (deep blue), one accent (burnt orange), warm neutrals, light theme only, 2px radius, no gradients or shadows, IBM Plex Sans and Mono, a 12-24px type scale. scripts/contrast.mjs checks 16 token pairs against WCAG AA and the ratios are documented in styles.css. One icon library (lucide-react). Status is plain text with colour as reinforcement; uncertainty is shown as ranges and confidence words."
+        },
+        {
+          "what": "Accessibility",
+          "how": "Skip link, visible focus ring, semantic table roles on the virtualized grid with aria-activedescendant, labels on every control, aria-live on result counts, responsive layout verified at 390px and 1440px."
+        },
+        {
+          "what": "Ranked list",
+          "how": "generate now returns one schedule per distinct set of courses (best section choice); section-level alternatives stay in the pool and feed the backup schedules."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "With requirements totalling 19 credit hours and a 18-hour maximum, the app said only that no combination fits",
+          "cause": "The search pruned at the root and the generic message did not name the credit limit",
+          "fix": "generate computes the minimum possible credit total first and reports 'Your requirements need at least N credit hours ... but your maximum is M'"
+        },
+        {
+          "symptom": "The top eight schedules differed by a single section of the same courses",
+          "cause": "The ranked list was the raw top of the pool",
+          "fix": "De-duplicate by course set for the ranked list; keep the pool for backups"
+        },
+        {
+          "symptom": "Phone layout scrolled sideways on every screen (about 500 px overflow)",
+          "cause": "The one-column grid used 1fr, which lets wide tables stretch it",
+          "fix": "minmax(0, 1fr) and min-width: 0 on main"
+        },
+        {
+          "symptom": "Calendar hour labels wrapped in the compact view and the first label touched the header",
+          "cause": "Labels were absolutely positioned at the edge and included a.m./p.m.",
+          "fix": "Compact labels drop the suffix; the first label is nudged down"
+        },
+        {
+          "symptom": "'1 courses offered'",
+          "cause": "No plural handling",
+          "fix": "Singular and plural text"
+        },
+        {
+          "symptom": "Courses table needed sideways scrolling to see ease and difficulty at 1440 px",
+          "cause": "Eleven columns summed past the content width",
+          "fix": "Removed the room column (room is in the detail panel and calendar) and narrowed the rest"
+        }
+      ],
+      "notes": [
+        "The interface was exercised only against a synthetic database (backend/tests/demo_db.py) with headless Chromium: all six screens loaded at 1440 and 390 px with no console errors, failed requests or horizontal overflow. It has not been run against your crawled data.",
+        "Not exercised live: the language-model features (no API key in the build environment) and the Playwright login window (needs a display). The model calls are covered by tests with a stand-in client.",
+        "Keyboard navigation inside the courses grid and the Enter-to-save login fallback were written but not checked by hand."
+      ],
+      "id": 7,
+      "date": "2026-10-08"
     }
   ]
 }

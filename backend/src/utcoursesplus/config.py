@@ -1,5 +1,6 @@
 """Paths and constants. All local state lives under <repo>/data (gitignored)."""
 
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -8,7 +9,7 @@ CACHE_DIR = DATA_DIR / "cache"
 SESSION_DIR = DATA_DIR / "session"
 SESSION_FILE = SESSION_DIR / "state.json"
 SAMPLES_DIR = DATA_DIR / "samples"
-DB_PATH = DATA_DIR / "utcoursesplus.sqlite"
+DB_PATH = Path(os.environ.get("UTCP_DB", DATA_DIR / "utcoursesplus.sqlite"))
 
 TERM = "20272"  # Spring 2027
 CONTACT = "ks62852@eid.utexas.edu"
