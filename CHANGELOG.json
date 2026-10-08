@@ -471,6 +471,42 @@
       ],
       "id": 9,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: like-to-take ranking, keyboard registration runner with case tree, syllabus screen",
+      "summary": "Interface for three requests: a ranked Like to Take list next to Required courses; a keyboard registration runner (Space to confirm, arrows to move between fallback sections, copy to clipboard) with a visual tree of every case; and a Syllabi screen that reads UT's syllabus site for a chosen subset of courses and scores difficulty.",
+      "files": [
+        "frontend/src/{Requirements,Registration,Syllabi,Courses,Schedules,Sources,App,api}.tsx/.ts",
+        "frontend/src/{runner.ts,runner.test.ts,styles.css}",
+        "frontend/{package.json,tsconfig.json}",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Required and Like to take lists",
+          "how": "Two lists on the Requirements screen. The Like to take list is ranked by drag and drop (HTML5 drag events) with move up and move down buttons as the keyboard alternative; each item can be moved between the lists or removed. The Courses detail panel has Make required and Add to Like to take. The Ranked schedules screen reports which preferred courses a schedule includes and which were left out."
+        },
+        {
+          "what": "Registration runner",
+          "how": "runner.ts holds the logic as pure functions (confirm, skip, undo, option cycling that skips sections overlapping ones already registered, warnings for overlaps with other planned sections), tested with node:test (six tests). The screen listens for Space, arrows, C, X and Backspace when focus is not in a form field or on a button, copies the unique number with navigator.clipboard (with a textarea fallback), and saves progress per plan in localStorage."
+        },
+        {
+          "what": "Every-case tree",
+          "how": "Each course is a row: the planned section, then 'if full' arrows to the next-best sections that still fit the plan, ending in 'none left'; a final row shows the backup schedules and which sections they share with the plan. Boxes are buttons that jump the runner to that option. Drawn with plain CSS borders; no colour is used except for status text."
+        },
+        {
+          "what": "Syllabi screen",
+          "how": "Step 1 lists required and like-to-take courses (plus any code you add) with checkboxes; Find syllabi runs a background job whose log is polled once a second. Step 2 lists what exists per course with the recommended ones ticked; Read runs a second job. Step 3 shows difficulty (1 minus lightness) per course and, expandable, each syllabus's coverage and the per-component rules. Messages say what to do when there is no saved login or no API key."
+        }
+      ],
+      "bugs_fixed": [],
+      "notes": [
+        "Checked in headless Chromium against the synthetic demo database: dragging re-ranked the list on the server, the runner keys cycled options and advanced courses, the clipboard held the expected unique number after each step, undo restored the course, and the Syllabi flow worked with the syllabus endpoints stubbed. No console errors or failed requests.",
+        "Not exercised: a real search or download against UT's syllabus site (needs your login), and the model calls.",
+        "Courses with a linked lab or discussion are separate rows in the registrar schedule, so the runner treats each as its own course."
+      ],
+      "id": 10,
+      "date": "2026-10-08"
     }
   ]
 }

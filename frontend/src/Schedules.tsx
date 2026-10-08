@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, FEATURE_LABELS, f2 } from "./api";
 import type { GenResult, Schedule, Section, Status } from "./api";
 import { Calendar } from "./Calendar";
@@ -8,7 +8,6 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
   status: Status; result: GenResult | null; busy: boolean; error: string; onGenerate: () => Promise<GenResult | null>;
 }) {
   const [idx, setIdx] = useState(0);
-  void api;
   if (!status.has_data) return <div><PageHead title="Ranked schedules" /><NoData /></div>;
   const run = async () => { setIdx(0); await onGenerate(); };
   const cur: Schedule | undefined = result?.schedules[idx];
@@ -41,6 +40,7 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
           <div className="stack">
             <h2>Schedule {idx + 1}: {cur.credits} credit hours</h2>
             <Calendar sections={cur.sections} label={`Weekly calendar for schedule ${idx + 1}`} />
+            {cur.wish_included ? <WishSummary included={cur.wish_included} /> : null}
             <SectionTable sections={cur.sections} />
             <div>
               <h3>Why this ranks {idx === 0 ? "first" : `at ${idx + 1}`}</h3>
@@ -82,6 +82,19 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
         </section>
       ) : null}
     </div>
+  );
+}
+
+function WishSummary({ included }: { included: string[] }) {
+  const [all, setAll] = useState<string[] | null>(null);
+  useEffect(() => { api<{ preferred_courses: string[] }>("/api/requirements").then((r) => setAll(r.preferred_courses)).catch(() => setAll(null)); }, []);
+  if (!all || !all.length) return null;
+  const left = all.filter((c) => !included.includes(c));
+  return (
+    <p className="small">
+      <b>Like to take:</b> {included.length ? `${included.join(", ")} included` : "none included"}
+      {left.length ? <span className="muted">; left out: {left.join(", ")} (they clash with higher-ranked choices, or break your credit or time limits)</span> : null}.
+    </p>
   );
 }
 

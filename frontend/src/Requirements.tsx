@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Trash2 } from "lucide-react";
 import { api, ApiError, f2 } from "./api";
 import type { CoreArea, Group, Requirements as Req, Status, Suggestion } from "./api";
 import { Confidence, Interval, NoData, Note, PageHead, StatusText } from "./ui";
@@ -12,7 +12,6 @@ export function RequirementsScreen({ status }: { status: Status }) {
   const [req, setReq] = useState<Req | null>(null);
   const [err, setErr] = useState("");
   const [warn, setWarn] = useState<string[]>([]);
-  const [courseInput, setCourseInput] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -44,12 +43,6 @@ export function RequirementsScreen({ status }: { status: Status }) {
 
   const toggleArea = (code: string) =>
     save({ ...req, core_areas: req.core_areas.includes(code) ? req.core_areas.filter((c) => c !== code) : [...req.core_areas, code] });
-  const addCourses = () => {
-    const parts = courseInput.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-    if (parts.length) void save({ ...req, required_courses: [...req.required_courses, ...parts] });
-    setCourseInput("");
-  };
-
   return (
     <div>
       <PageHead title="Requirements">Choose what you still need. Schedules are built from these, and nothing here leaves your computer except the pasted audit lines you choose to parse.</PageHead>
@@ -72,28 +65,26 @@ export function RequirementsScreen({ status }: { status: Status }) {
       </section>
 
       <section className="block" aria-labelledby="req-h">
-        <h2 id="req-h">Specific courses you must take</h2>
-        <p className="lede">Type course codes such as C S 312 or M 408C, separated by commas or new lines.</p>
-        <div className="row">
-          <label className="field" style={{ minWidth: 260 }}>
-            <span>Add courses</span>
-            <input type="text" value={courseInput} onChange={(e) => setCourseInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCourses()} />
-          </label>
-          <button className="btn" style={{ alignSelf: "end" }} onClick={addCourses}>Add</button>
+        <h2 id="req-h">Your courses</h2>
+        <p className="lede">Required courses must be in every schedule. Like to take courses are optional: the app includes as many as fit, and when two clash it keeps the one you ranked higher. Drag a like-to-take course to rank it, or use its move buttons. The weight for this is set on the Preferences screen.</p>
+        <div className="grid2" style={{ alignItems: "start" }}>
+          <CourseList
+            title="Required"
+            items={req.required_courses}
+            onChange={(items) => save({ ...req, required_courses: items, preferred_courses: req.preferred_courses.filter((c) => !items.includes(c)) })}
+            moveLabel="Like to take instead"
+            onMove={(c) => save({ ...req, required_courses: req.required_courses.filter((x) => x !== c), preferred_courses: [...req.preferred_courses, c] })}
+          />
+          <CourseList
+            title="Like to take"
+            ranked
+            items={req.preferred_courses}
+            onChange={(items) => save({ ...req, preferred_courses: items, required_courses: req.required_courses.filter((c) => !items.includes(c)) })}
+            moveLabel="Make required"
+            onMove={(c) => save({ ...req, preferred_courses: req.preferred_courses.filter((x) => x !== c), required_courses: [...req.required_courses, c] })}
+          />
         </div>
         {warn.map((w) => <p key={w} className="small warn" style={{ marginTop: 6 }}>{w}</p>)}
-        {req.required_courses.length ? (
-          <ul className="list-plain" style={{ marginTop: 12, maxWidth: 420 }}>
-            {req.required_courses.map((c) => (
-              <li key={c} className="row" style={{ justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 6 }}>
-                <span>{c}</span>
-                <button className="btn text" onClick={() => save({ ...req, required_courses: req.required_courses.filter((x) => x !== c) })} aria-label={`Remove ${c}`}>
-                  <Trash2 size={14} aria-hidden /> Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
         {req.groups.length ? (
           <div style={{ marginTop: 16 }}>
             <h3>Pick-from groups</h3>
@@ -297,5 +288,61 @@ function AuditPaste({ onApplied }: { onApplied: (r: Req) => void }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function CourseList({ title, items, onChange, onMove, moveLabel, ranked }: {
+  title: string; items: string[]; onChange: (items: string[]) => void; onMove: (code: string) => void; moveLabel: string; ranked?: boolean;
+}) {
+  const [text, setText] = useState("");
+  const [drag, setDrag] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+  const add = () => {
+    const parts = text.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+    if (parts.length) onChange([...items, ...parts]);
+    setText("");
+  };
+  const reorder = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || to >= items.length) return;
+    const next = [...items];
+    const [m] = next.splice(from, 1);
+    next.splice(to, 0, m);
+    onChange(next);
+  };
+  const id = title.toLowerCase().replace(/\W+/g, "-");
+  return (
+    <div>
+      <h3 id={`${id}-h`}>{title} <span className="muted small" style={{ fontWeight: 400 }}>({items.length})</span></h3>
+      <div className="row" style={{ margin: "8px 0" }}>
+        <label className="field" style={{ minWidth: 200 }}>
+          <span className="xs">Add course codes, for example C S 312 or M 408C</span>
+          <input type="text" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} aria-describedby={`${id}-h`} />
+        </label>
+        <button className="btn" style={{ alignSelf: "end" }} onClick={add}>Add</button>
+      </div>
+      {items.length === 0 ? <p className="small muted">None yet.</p> : (
+        <ol className="list-plain" aria-labelledby={`${id}-h`} style={{ counterReset: "r" }}>
+          {items.map((c, i) => (
+            <li key={c} draggable={!!ranked}
+              onDragStart={() => setDrag(i)} onDragEnd={() => { setDrag(null); setOver(null); }}
+              onDragOver={(e) => { if (ranked && drag !== null) { e.preventDefault(); setOver(i); } }}
+              onDrop={() => { if (drag !== null) reorder(drag, i); setDrag(null); setOver(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--line)", padding: "6px 0",
+                background: over === i && drag !== i ? "var(--primary-tint)" : undefined, opacity: drag === i ? 0.5 : 1, cursor: ranked ? "grab" : undefined }}>
+              {ranked ? <><GripVertical size={16} aria-hidden style={{ color: "var(--muted)" }} /><span className="mono small" style={{ width: 22 }}>{i + 1}.</span></> : null}
+              <span style={{ flex: 1 }}>{c}</span>
+              {ranked ? (
+                <>
+                  <button className="btn text" aria-label={`Move ${c} up`} disabled={i === 0} onClick={() => reorder(i, i - 1)}><ArrowUp size={14} aria-hidden /></button>
+                  <button className="btn text" aria-label={`Move ${c} down`} disabled={i === items.length - 1} onClick={() => reorder(i, i + 1)}><ArrowDown size={14} aria-hidden /></button>
+                </>
+              ) : null}
+              <button className="btn text small" onClick={() => onMove(c)}>{moveLabel}</button>
+              <button className="btn text" onClick={() => onChange(items.filter((x) => x !== c))} aria-label={`Remove ${c}`}><Trash2 size={14} aria-hidden /></button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }

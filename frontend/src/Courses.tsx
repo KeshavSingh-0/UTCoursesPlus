@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ExternalLink } from "lucide-react";
 import { api, f2 } from "./api";
-import type { CoreArea, Section, Status } from "./api";
+import type { CoreArea, Requirements, Section, Status } from "./api";
 import { Confidence, Interval, NoData, Note, PageHead, StatusText, sourceHost, when } from "./ui";
 
 const COLS = "64px 84px minmax(150px, 1.5fr) minmax(120px, 1fr) 178px 88px minmax(120px, 1fr) 138px 138px 70px";
@@ -115,9 +115,25 @@ function Detail({ s, areaName }: { s: Section; areaName: Record<string, string> 
     s.instructors.forEach((n) => api<{ url: string }>(`/api/instructors/rmp-link?name=${encodeURIComponent(n)}`).then((r) => setLinks((l) => ({ ...l, [n]: r.url }))).catch(() => undefined));
   }, [s.unique]); // eslint-disable-line react-hooks/exhaustive-deps
   const g = s.signal;
+  const [placed, setPlaced] = useState("");
+  useEffect(() => setPlaced(""), [s.unique]);
+  const place = async (where: "required" | "like") => {
+    try {
+      const r = await api<Requirements>("/api/requirements");
+      const req = { ...r, required_courses: r.required_courses.filter((c) => c !== s.code), preferred_courses: r.preferred_courses.filter((c) => c !== s.code) };
+      if (where === "required") req.required_courses.push(s.code); else req.preferred_courses.push(s.code);
+      await api("/api/requirements", { method: "PUT", body: req });
+      setPlaced(where === "required" ? `${s.code} is now required.` : `${s.code} added to Like to take at the bottom of your ranking.`);
+    } catch (e) { setPlaced((e as Error).message); }
+  };
   return (
     <section className="block" aria-labelledby="detail-h" aria-live="polite">
       <h2 id="detail-h" style={{ fontSize: "var(--fs-lg)" }}>{s.code} {s.title} <span className="muted mono" style={{ fontWeight: 400 }}>unique {s.unique}</span></h2>
+      <div className="row" style={{ margin: "8px 0 4px" }}>
+        <button className="btn" onClick={() => place("required")}>Make required</button>
+        <button className="btn" onClick={() => place("like")}>Add to Like to take</button>
+        {placed ? <span className="small muted">{placed}</span> : null}
+      </div>
       <div className="grid2" style={{ marginTop: 10 }}>
         <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "130px 1fr", gap: "4px 12px" }} className="small">
           <dt className="muted">Credits</dt><dd style={{ margin: 0 }}>{s.credits}</dd>

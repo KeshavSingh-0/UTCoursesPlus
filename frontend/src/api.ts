@@ -41,22 +41,27 @@ export type Section = {
 };
 export type CoreArea = { code: string; name: string };
 export type Group = { name: string; kind: "core_area" | "required_course" | "choose_from" | "elective"; core_code: string | null; courses: string[]; pick: number; credit_hours_needed: number | null };
-export type Requirements = { core_areas: string[]; required_courses: string[]; groups: Group[]; elective_depts: string[]; registration_time: string | null };
+export type Requirements = { core_areas: string[]; required_courses: string[]; preferred_courses: string[]; groups: Group[]; elective_depts: string[]; registration_time: string | null };
 export type TimeBlock = { days: string[]; start_min: number; end_min: number };
 export type Hard = {
   earliest_start_min: number | null; latest_end_min: number | null; days_off: string[]; max_gap_min: number | null; max_walk_min: number | null;
   credit_min: number; credit_max: number; excluded_instructors: string[]; excluded_sections: string[]; excluded_times: TimeBlock[]; required_courses?: string[];
 };
-export type Weights = Record<"ease" | "syllabus_lightness" | "professor_quality" | "time_of_day" | "compactness" | "few_gaps" | "walking" | "seat_availability", number>;
+export type Weights = Record<"ease" | "syllabus_lightness" | "professor_quality" | "time_of_day" | "compactness" | "few_gaps" | "walking" | "seat_availability" | "wishlist", number>;
 export type Prefs = { hard: Hard; weights: Weights; time_bias: number };
 export type HistoryItem = { id: number; at: string; note: string };
 export type DiffRow = { path: string; old: unknown; new: unknown; phrase: string | null; rationale: string };
 export type Proposal = { question: string | null; tradeoff: string | null; config: Prefs | null; diff: DiffRow[] };
 export type Schedule = {
   credits: number; utility: number; slots: string[]; features: Record<string, number>; contributions: Record<string, number>;
-  sections: Section[]; why?: string[];
+  sections: Section[]; why?: string[]; wish_included?: string[];
+};
+export type RegOption = {
+  unique: string; when: string; status: string; reserved: boolean; instructors: string[];
+  meets: { days: string[]; start: number; end: number }[]; conflicts: string[];
 };
 export type RegStep = {
+  options: RegOption[]; credits: number;
   order: number; unique: string; code: string; title: string; when: string; status: string; reserved: boolean; scarcity: number; reasons: string[];
   fallback: { unique: string; when: string; status: string; instructors: string[] } | null; fetched_at: string;
 };
@@ -73,7 +78,7 @@ export type Suggestion = {
 
 export const FEATURE_LABELS: Record<string, string> = {
   ease: "Ease (grades and professor difficulty)", syllabus_lightness: "Syllabus lightness", professor_quality: "Professor rating",
-  time_of_day: "Time-of-day fit", compactness: "Fewer days on campus", few_gaps: "Fewer gaps", walking: "Short walks", seat_availability: "Seat availability",
+  time_of_day: "Time-of-day fit", compactness: "Fewer days on campus", few_gaps: "Fewer gaps", walking: "Short walks", seat_availability: "Seat availability", wishlist: "Preferred courses included",
 };
 
 export function fmtMin(m: number | null | undefined): string {

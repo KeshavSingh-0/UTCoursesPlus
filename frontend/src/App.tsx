@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, ClipboardList, Database, ListChecks, SlidersHorizontal, Table2 } from "lucide-react";
+import { CalendarDays, ClipboardList, Database, FileText, ListChecks, SlidersHorizontal, Table2 } from "lucide-react";
 import { api } from "./api";
 import type { GenResult, Status } from "./api";
 import { CoursesScreen } from "./Courses";
@@ -8,6 +8,7 @@ import { RegistrationScreen } from "./Registration";
 import { RequirementsScreen } from "./Requirements";
 import { SchedulesScreen } from "./Schedules";
 import { SourcesScreen } from "./Sources";
+import { SyllabiScreen } from "./Syllabi";
 import { Note } from "./ui";
 
 const SCREENS = [
@@ -16,6 +17,7 @@ const SCREENS = [
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "schedules", label: "Ranked schedules", icon: CalendarDays },
   { id: "registration", label: "Registration plan", icon: ClipboardList },
+  { id: "syllabi", label: "Syllabi", icon: FileText },
   { id: "sources", label: "Data sources", icon: Database },
 ] as const;
 type Id = (typeof SCREENS)[number]["id"];
@@ -69,6 +71,7 @@ export function App() {
         {screen === "preferences" && <PreferencesScreen status={status} onChanged={generate} last={result} />}
         {screen === "schedules" && <SchedulesScreen status={status} result={result} busy={busy} error={genErr} onGenerate={generate} />}
         {screen === "registration" && <RegistrationScreen status={status} result={result} />}
+        {screen === "syllabi" && <SyllabiScreen />}
         {screen === "sources" && <SourcesScreen />}
       </main>
     </div>

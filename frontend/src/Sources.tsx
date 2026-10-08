@@ -69,7 +69,7 @@ export function SourcesScreen() {
 
           <section className="block">
             <h2>Syllabi</h2>
-            <p className="lede">Only publicly reachable syllabi are fetched, after checking the site's robots.txt, and syllabi behind a UT login are never fetched. Any value the model cannot back with a quote found in the text is discarded. Paste the text yourself if a site blocks automated access.</p>
+            <p className="lede">Syllabi are read on the Syllabi screen, which can search UT's syllabus site for the courses you choose. Everything read so far is listed here with where it came from. Any value the model cannot back with a quote found in the text is discarded.</p>
             {d.syllabi.length ? (
               <table className="t" style={{ marginBottom: 12 }}>
                 <thead><tr><th>Course</th><th>Instructor</th><th>Source</th><th className="num">Lightness</th><th className="num">Coverage</th><th>Added</th></tr></thead>
@@ -78,8 +78,7 @@ export function SourcesScreen() {
                     <td className="small" style={{ wordBreak: "break-all" }}>{s.source_url ?? s.source_kind}</td>
                     <td className="num">{s.lightness !== null ? s.lightness.toFixed(2) : "none"}</td><td className="num">{s.coverage !== null ? `${Math.round(s.coverage * 100)}%` : "none"}</td><td>{when(s.fetched_at)}</td></tr>))}</tbody>
               </table>
-            ) : null}
-            <SyllabusForm onDone={load} />
+            ) : <p className="muted small">None read yet.</p>}
           </section>
         </>
       ) : !err ? <p className="muted">Loading.</p> : null}
@@ -123,7 +122,7 @@ function Importer({ title, help, endpoint, onDone, withSource }: { title: string
   );
 }
 
-function SyllabusForm({ onDone }: { onDone: () => void }) {
+export function SyllabusForm({ onDone }: { onDone: () => void }) {
   const [course, setCourse] = useState("");
   const [instr, setInstr] = useState("");
   const [url, setUrl] = useState("");

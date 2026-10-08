@@ -183,3 +183,27 @@ table.t tr.sel td { background: var(--primary-tint); }
 @media (max-width: 900px) {
   .sched-grid { grid-template-columns: 1fr !important; }
 }
+
+/* registration tree and runner */
+kbd { font-family: var(--mono); font-size: var(--fs-xs); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--radius); padding: 1px 5px; background: var(--surface); }
+.rtree .root { font-weight: 600; margin: 4px 0 6px; }
+.rtree .branches { list-style: none; margin: 0 0 0 8px; padding: 0 0 0 22px; border-left: 1px solid var(--line-strong); }
+.rtree .branch { position: relative; display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; padding: 10px 0; align-items: start; }
+.rtree .branch::before { content: ""; position: absolute; left: -22px; top: 26px; width: 22px; border-top: 1px solid var(--line-strong); }
+.rtree .chain { display: flex; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; }
+.rtree .step { display: flex; align-items: flex-start; flex: none; }
+.rtree .link { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; width: 64px; padding-top: 4px; font-size: var(--fs-xs); color: var(--muted); }
+.rtree .link .line { position: relative; display: block; width: 100%; height: 0; border-top: 1px solid var(--line-strong); margin-top: 8px; }
+.rtree .link .line::after { content: ""; position: absolute; right: 0; top: -4px; border-left: 6px solid var(--line-strong); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+.rtree .node { display: block; text-align: left; min-width: 168px; max-width: 220px; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 6px 8px; background: var(--bg); font: inherit; font-size: var(--fs-sm); color: var(--text); cursor: pointer; }
+.rtree .node:hover { background: var(--surface); }
+.rtree .node.cur { border: 2px solid var(--primary); padding: 5px 7px; }
+.rtree .node.done { background: var(--primary-tint); }
+.rtree .node.end { cursor: default; border-style: dashed; background: var(--bg); }
+.rtree .node.end:hover { background: var(--bg); }
+@media (max-width: 900px) {
+  .runner { grid-template-columns: 1fr !important; }
+  .rtree .branch { grid-template-columns: 1fr; }
+}
+
+pre.log { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.5; max-height: 260px; overflow: auto; white-space: pre-wrap; }
