@@ -15,25 +15,99 @@
         "README.md"
       ],
       "changes": [
-        {"what": "Parser for registrar results pages", "how": "selectolax (lexbor) reads table.results; rows are matched by their data-th header text, course headers (td.course_header h2) are split into dept, number and title with a regex, and each section is validated by a strict Pydantic Section model. Per-row failures are recorded, not fatal."},
-        {"what": "Day/time parsing", "how": "timeutil.parse_days uses a TH|M|T|W|F|S|U regex and rejects leftovers; parse_time_range converts 'a.m./p.m.' ranges to minutes from midnight and rejects end <= start."},
-        {"what": "SQLite schema and upsert", "how": "db.py creates course, section, meeting, instructor, section_instructor, section_tag, core_area, crawl_log, parse_failure and requirement_group tables. Upsert replaces scalar fields and meetings but unions tags and instructors, and keeps an existing level when a new source lacks one."},
-        {"what": "Throttled, cached, read-only fetcher", "how": "fetch.Fetcher caches by sha256 of the URL under data/cache, waits at least 3 seconds between live requests, backs off exponentially on network errors and 5xx, and raises BlockedError on 403, 429 or CAPTCHA text and SessionExpired on a redirect to the UT login."},
-        {"what": "Manual login and session clearing", "how": "session.login opens a headed Playwright Chromium, waits for the schedule search page, then saves cookies only (storage_state, mode 600) to data/session/. clear-session deletes that folder. The code never reads credentials."},
-        {"what": "Crawl plan", "how": "crawl.plan builds 10 Core-area searches plus every field of study x L/U/G from the home-page select (229 fields), following next_unique pagination links."},
-        {"what": "Offline importers and quality report", "how": "import-html parses pages saved from the browser; import-json validates a list of Sections; quality.report prints counts, parse failures, missing times and tag coverage."},
-        {"what": "Tests", "how": "23 pytest tests covering time parsing (plus a Hypothesis round trip), parsing, DB upserts, the JSON importer rejecting malformed input, crawl planning and the fetcher's cache, throttle, block and session-expiry behavior."}
+        {
+          "what": "Parser for registrar results pages",
+          "how": "selectolax (lexbor) reads table.results; rows are matched by their data-th header text, course headers (td.course_header h2) are split into dept, number and title with a regex, and each section is validated by a strict Pydantic Section model. Per-row failures are recorded, not fatal."
+        },
+        {
+          "what": "Day/time parsing",
+          "how": "timeutil.parse_days uses a TH|M|T|W|F|S|U regex and rejects leftovers; parse_time_range converts 'a.m./p.m.' ranges to minutes from midnight and rejects end <= start."
+        },
+        {
+          "what": "SQLite schema and upsert",
+          "how": "db.py creates course, section, meeting, instructor, section_instructor, section_tag, core_area, crawl_log, parse_failure and requirement_group tables. Upsert replaces scalar fields and meetings but unions tags and instructors, and keeps an existing level when a new source lacks one."
+        },
+        {
+          "what": "Throttled, cached, read-only fetcher",
+          "how": "fetch.Fetcher caches by sha256 of the URL under data/cache, waits at least 3 seconds between live requests, backs off exponentially on network errors and 5xx, and raises BlockedError on 403, 429 or CAPTCHA text and SessionExpired on a redirect to the UT login."
+        },
+        {
+          "what": "Manual login and session clearing",
+          "how": "session.login opens a headed Playwright Chromium, waits for the schedule search page, then saves cookies only (storage_state, mode 600) to data/session/. clear-session deletes that folder. The code never reads credentials."
+        },
+        {
+          "what": "Crawl plan",
+          "how": "crawl.plan builds 10 Core-area searches plus every field of study x L/U/G from the home-page select (229 fields), following next_unique pagination links."
+        },
+        {
+          "what": "Offline importers and quality report",
+          "how": "import-html parses pages saved from the browser; import-json validates a list of Sections; quality.report prints counts, parse failures, missing times and tag coverage."
+        },
+        {
+          "what": "Tests",
+          "how": "23 pytest tests covering time parsing (plus a Hypothesis round trip), parsing, DB upserts, the JSON importer rejecting malformed input, crawl planning and the fetcher's cache, throttle, block and session-expiry behavior."
+        }
       ],
       "bugs_fixed": [
-        {"symptom": "ImportError: Modest backend is deprecated", "cause": "selectolax 1.x removed selectolax.parser", "fix": "import LexborHTMLParser and LexborNode from selectolax.lexbor"},
-        {"symptom": "samples command printed every start time as 0", "cause": "In SQLite '||' binds tighter than '/', so start_min/60||':' was evaluated wrongly", "fix": "format times with printf('%d:%02d-%d:%02d', ...)"},
-        {"symptom": "A homepage test expected more than 250 departments", "cause": "The guess was wrong; the saved page has 229 fields of study", "fix": "assert exactly 229"},
-        {"symptom": "ruff TRY203 and BLE001 failures, and a blind-exception test", "cause": "A pointless re-raise, blanket 'except Exception' in the parser and in session.login, and pytest.raises(Exception)", "fix": "removed the re-raise, caught ValueError/KeyError in the parser and PlaywrightError in login, used pydantic ValidationError in tests"},
-        {"symptom": "__pycache__ .pyc files were tracked in git", "cause": "Committed in the earlier scaffold before .gitignore existed", "fix": "git rm --cached and added __pycache__ to .gitignore"}
+        {
+          "symptom": "ImportError: Modest backend is deprecated",
+          "cause": "selectolax 1.x removed selectolax.parser",
+          "fix": "import LexborHTMLParser and LexborNode from selectolax.lexbor"
+        },
+        {
+          "symptom": "samples command printed every start time as 0",
+          "cause": "In SQLite '||' binds tighter than '/', so start_min/60||':' was evaluated wrongly",
+          "fix": "format times with printf('%d:%02d-%d:%02d', ...)"
+        },
+        {
+          "symptom": "A homepage test expected more than 250 departments",
+          "cause": "The guess was wrong; the saved page has 229 fields of study",
+          "fix": "assert exactly 229"
+        },
+        {
+          "symptom": "ruff TRY203 and BLE001 failures, and a blind-exception test",
+          "cause": "A pointless re-raise, blanket 'except Exception' in the parser and in session.login, and pytest.raises(Exception)",
+          "fix": "removed the re-raise, caught ValueError/KeyError in the parser and PlaywrightError in login, used pydantic ValidationError in tests"
+        },
+        {
+          "symptom": "__pycache__ .pyc files were tracked in git",
+          "cause": "Committed in the earlier scaffold before .gitignore existed",
+          "fix": "git rm --cached and added __pycache__ to .gitignore"
+        }
       ],
       "notes": [
         "The registrar schedule requires UT login; UT's acceptable-use policy (sections 5.7, 5.10) does not clearly permit scripted access. The user chose the automated crawl and accepts the account risk.",
         "Verified against one real saved page only (Core area 090, 40 sections, 0 parse failures). Department result pages and non-core flags are unverified until the first real crawl."
+      ]
+    },
+    {
+      "id": 2,
+      "date": "2026-10-08",
+      "commit_message": "fix: login command hung after manual login",
+      "summary": "The login command never saved the session after the user logged in, so the terminal stayed blocked.",
+      "files": [
+        "backend/src/utcoursesplus/session.py",
+        "backend/tests/test_session.py"
+      ],
+      "changes": [
+        {
+          "what": "Login detection based on URL and page title",
+          "how": "is_schedule_page() returns true when the host is utdirect.utexas.edu, the path contains /course_schedule/, and the title contains 'Course Search', 'Search Results' or 'Course Schedule'. It is unit tested against schedule, login and unrelated URLs."
+        },
+        {
+          "what": "Enter-key fallback",
+          "how": "The poll loop checks stdin with select(); pressing Enter saves the session if the browser is on the utdirect host, and prints a message if it is still on the login host."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "After logging in, 'uv run utcoursesplus login' kept waiting and the terminal could not be used for the next command",
+          "cause": "The old check required the text 'Search for' within the first 400 characters of the page body, and the page title does not contain it, so the check never became true",
+          "fix": "Replaced it with the URL and title check above, plus the Enter fallback. Ctrl+C on the old version discards the login, so re-run login with the new code."
+        }
+      ],
+      "notes": [
+        "Playwright cannot be run in this cloud container, so the new loop is covered by unit tests of the detection function only, not an end-to-end browser run."
       ]
     }
   ]
