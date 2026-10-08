@@ -26,7 +26,7 @@ NODE_BUDGET = 600_000
 POOL_SIZE = 300
 
 SECTION_FEATURES = ["ease", "syllabus_lightness", "professor_quality", "time_of_day", "seat_availability"]
-SCHEDULE_FEATURES = ["compactness", "few_gaps", "walking"]
+SCHEDULE_FEATURES = ["compactness", "few_gaps", "walking", "wishlist"]
 
 FEATURE_LABELS = {
     "ease": "Ease (grades and professor difficulty)",
@@ -37,6 +37,7 @@ FEATURE_LABELS = {
     "few_gaps": "Fewer gaps",
     "walking": "Short walks",
     "seat_availability": "Seat availability",
+    "wishlist": "Preferred courses included",
 }
 
 
@@ -106,6 +107,7 @@ class Scorer:
     sig: SignalIndex
     buildings: Buildings = field(default_factory=Buildings)
     _cache: dict[str, CourseSignal] = field(default_factory=dict)
+    wish: dict[str, float] = field(default_factory=dict)  # course code -> rank weight (best = largest)
 
     def signal(self, s: Sec) -> CourseSignal:
         k = f"{s.code}|{'/'.join(s.instructors)}"
@@ -117,6 +119,8 @@ class Scorer:
         w = {n: getattr(self.cfg.weights, n) for n in WEIGHT_NAMES}
         if not self.buildings.available:
             w["walking"] = 0.0
+        if not self.wish:
+            w["wishlist"] = 0.0
         tot = sum(w.values())
         return {k: v / tot for k, v in w.items()} if tot else w
 
@@ -159,7 +163,12 @@ class Scorer:
                     w = self.buildings.minutes(b1, b2)
                     if w is not None:
                         walk_total += w
+        wish = None
+        if self.wish:
+            got = sum(wt for code, wt in self.wish.items() if any(x.code == code for x in sections))
+            wish = got / sum(self.wish.values())
         return {
+            "wishlist": wish,
             "compactness": compact,
             "few_gaps": 1 / (1 + gap_total / 120.0),
             "walking": (1 / (1 + walk_total / 20.0)) if walk_known else None,
@@ -190,9 +199,11 @@ class Scorer:
 @dataclass
 class Slot:
     label: str
-    kind: str  # required | core | choose | elective
+    kind: str  # required | core | choose | wish | elective
     candidates: list[Sec]
     note: str = ""
+    optional: bool = False  # may be left empty (preferred courses, electives)
+    group: str = ""  # slots in one group share candidates; search takes them in a fixed order
 
 
 def _best_per_course(secs: list[Sec], scorer: Scorer, cap: int) -> list[Sec]:
@@ -209,8 +220,9 @@ def _best_per_course(secs: list[Sec], scorer: Scorer, cap: int) -> list[Sec]:
 
 def build_slots(
     cat: Catalog, req: Requirements, cfg: PreferenceConfig, scorer: Scorer
-) -> tuple[list[Slot], list[str]]:
+) -> tuple[list[Slot], list[str], list[str]]:
     problems: list[str] = []
+    notes: list[str] = []
     slots: list[Slot] = []
     taken: set[str] = set(req.required_courses)
     ok = lambda s: passes_hard(s, cfg)
@@ -238,7 +250,10 @@ def build_slots(
                 problems.append(f"{g.name}: no eligible sections.")
             slots.append(
                 Slot(
-                    f"{g.name} ({i + 1} of {g.pick})", "choose", _best_per_course(pool, scorer, CAND_PER_SLOT)
+                    f"{g.name} ({i + 1} of {g.pick})",
+                    "choose",
+                    _best_per_course(pool, scorer, CAND_PER_SLOT),
+                    group=f"choose:{g.name}",
                 )
             )
 
@@ -253,6 +268,18 @@ def build_slots(
         slots.append(Slot(CORE_NAMES.get(code, code), "core", _best_per_course(pool, scorer, CAND_PER_SLOT)))
 
     base = sum(min((s.credits for s in sl.candidates), default=3) for sl in slots)
+    prefs_ = [c for c in req.preferred_courses if c not in taken]
+    scorer.wish = {c: float(len(prefs_) - i) for i, c in enumerate(prefs_)}
+    for code in prefs_:
+        secs = [s for s in cat.by_code.get(code, []) if ok(s)]
+        if not secs:
+            notes.append(
+                f"{code} (like to take) has no eligible sections under your constraints, so it is left out."
+            )
+            continue
+        slots.append(
+            Slot(code, "wish", _best_per_course(secs, scorer, CAND_PER_SLOT), "Like to take", optional=True)
+        )
     need = max(0, math.ceil((cfg.hard.credit_min - base) / 3))
     if need:
         used_codes = taken | {s.code for sl in slots for s in sl.candidates if sl.kind == "required"}
@@ -282,9 +309,11 @@ def build_slots(
                     "elective",
                     _best_per_course(top, scorer, CAND_PER_SLOT * 2),
                     "Chosen from the easiest-ranked courses to reach your credit minimum",
+                    optional=True,
+                    group="elective",
                 )
             )
-    return slots, problems
+    return slots, problems, notes
 
 
 # ----------------------------------------------------------------------------- search
@@ -298,6 +327,7 @@ class Schedule:
     utility: float
     features: dict[str, float]
     contributions: dict[str, float]
+    wish_included: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -336,8 +366,7 @@ def generate(
     k: int = 10,
 ) -> Result:
     scorer = Scorer(cfg, sig, buildings or Buildings())
-    slots, problems = build_slots(cat, req, cfg, scorer)
-    notes: list[str] = []
+    slots, problems, notes = build_slots(cat, req, cfg, scorer)
     if cfg.hard.max_walk_min is not None and not scorer.buildings.available:
         notes.append("Max walking time was not applied: no building coordinates are loaded.")
     if not slots:
@@ -352,14 +381,14 @@ def generate(
     if any(not sl.candidates for sl in slots):
         return Result([], [], problems, False, 0, notes)
 
-    min_total = sum(min(x.credits for x in sl.candidates) for sl in slots)
+    min_total = sum(min(x.credits for x in sl.candidates) for sl in slots if not sl.optional)
     if min_total > cfg.hard.credit_max:
         return Result(
             [],
             [],
             [
                 (
-                    f"Your requirements need at least {min_total} credit hours ({len(slots)} courses), but your maximum is "
+                    f"Your requirements need at least {min_total} credit hours ({sum(1 for sl in slots if not sl.optional)} courses), but your maximum is "
                     f"{cfg.hard.credit_max}. Raise the credit maximum on the Preferences screen or remove a requirement."
                 )
             ],
@@ -367,10 +396,10 @@ def generate(
             0,
             notes,
         )
-    order = sorted(slots, key=lambda sl: len(sl.candidates))
+    order = sorted(slots, key=lambda sl: (sl.optional, len(sl.candidates)))
     w = scorer.weights()
     sec_w = sum(w[f] for f in SECTION_FEATURES)
-    sched_w = sum(w[f] for f in SCHEDULE_FEATURES if f != "walking" or scorer.buildings.available)
+    sched_w = sum(w[f] for f in SCHEDULE_FEATURES)
     total_w = sec_w + sched_w or 1.0
 
     def section_value(s: Sec) -> float:
@@ -382,8 +411,13 @@ def generate(
     for i in range(len(order) - 1, -1, -1):
         suffix_max[i] = suffix_max[i + 1] + slot_max[i]
     suffix_min_credits = [0] * (len(order) + 1)
+    any_optional = [False] * (len(order) + 1)
+    suffix_best = [0.0] * (len(order) + 1)  # best single-section value among slots i..end
     for i in range(len(order) - 1, -1, -1):
-        suffix_min_credits[i] = suffix_min_credits[i + 1] + min(s.credits for s in order[i].candidates)
+        mc = 0 if order[i].optional else min(s.credits for s in order[i].candidates)
+        suffix_min_credits[i] = suffix_min_credits[i + 1] + mc
+        any_optional[i] = any_optional[i + 1] or order[i].optional
+        suffix_best[i] = max(suffix_best[i + 1], slot_max[i])
     n_slots = len(order)
     cand_sorted = [sorted(sl.candidates, key=lambda s: -section_value(s)) for sl in order]
 
@@ -392,6 +426,8 @@ def generate(
     state = {"nodes": 0, "trunc": False}
     chosen: list[Sec] = []
     used_codes: set[str] = set()
+    last_pos: dict[str, int] = {}  # group -> position of the last candidate taken (fixed order in a group)
+    skipped: set[str] = set()  # groups whose remaining slots must stay empty
 
     def worst() -> float:
         return heap[0][0] if len(heap) >= POOL_SIZE else -1.0
@@ -403,34 +439,70 @@ def generate(
         state["nodes"] += 1
         if credits + suffix_min_credits[i] > cfg.hard.credit_max:
             return
-        bound = (sec_sum + suffix_max[i]) / n_slots * sec_w / total_w + sched_w / total_w
-        if bound <= worst():
+        if any_optional[i]:
+            # optional slots may stay empty, so the section average can only be bounded by the better of
+            # what is chosen so far and the best single section still available
+            mean_ub = max(sec_sum / len(chosen) if chosen else 0.0, suffix_best[i])
+        else:
+            mean_ub = (sec_sum + suffix_max[i]) / (len(chosen) + (n_slots - i))
+        if mean_ub / total_w + sched_w / total_w <= worst():
             return
         if i == n_slots:
             if credits < cfg.hard.credit_min or not _gaps_ok(
                 chosen, cfg.hard.max_gap_min, cfg.hard.max_walk_min, scorer.buildings
             ):
                 return
+            if not chosen:
+                return
             u, feats, contrib = scorer.utility(chosen)
-            sch = Schedule(list(chosen), [sl.label for sl in order], credits, u, feats, contrib)
+            sch = Schedule(
+                list(chosen),
+                [sl.label for sl in order],
+                credits,
+                u,
+                feats,
+                contrib,
+                [c for c in scorer.wish if any(x.code == c for x in chosen)],
+            )
             item = (u, next(counter), sch)
             if len(heap) < POOL_SIZE:
                 heapq.heappush(heap, item)
             elif u > heap[0][0]:
                 heapq.heapreplace(heap, item)
             return
-        for s in cand_sorted[i]:
+        slot = order[i]
+        grp = slot.group
+        if grp and grp in skipped:
+            rec(i + 1, credits, sec_sum)
+            return
+        start = last_pos.get(grp, -1) + 1 if grp else 0
+        for pos in range(start, len(cand_sorted[i])):
+            s = cand_sorted[i][pos]
             if s.code in used_codes:
                 continue
             if any(meets_overlap(s, c) for c in chosen):
                 continue
             chosen.append(s)
             used_codes.add(s.code)
+            prev = last_pos.get(grp)
+            if grp:
+                last_pos[grp] = pos
             rec(i + 1, credits + s.credits, sec_sum + section_value(s))
+            if grp:
+                if prev is None:
+                    del last_pos[grp]
+                else:
+                    last_pos[grp] = prev
             used_codes.discard(s.code)
             chosen.pop()
             if state["trunc"]:
                 return
+        if slot.optional:
+            if grp:
+                skipped.add(grp)
+            rec(i + 1, credits, sec_sum)
+            if grp:
+                skipped.discard(grp)
 
     rec(0, 0, 0.0)
     pool = [t[2] for t in sorted(heap, key=lambda t: -t[0])]
@@ -579,8 +651,38 @@ def registration_plan(cat: Catalog, sched: Schedule, req: Requirements, cfg: Pre
                 "status": f.status,
                 "instructors": list(f.instructors),
             }
+        rank = {"open": 0, "waitlisted": 1, "closed": 2}
+        peers = [x for x in sched.sections if x is not s]
+
+        def option(o: Sec, peers: list[Sec] = peers) -> dict:
+            return {
+                "unique": o.unique,
+                "when": when_text(o),
+                "status": o.status,
+                "reserved": o.reserved,
+                "instructors": list(o.instructors),
+                "meets": [{"days": list(m.days), "start": m.start, "end": m.end} for m in o.timed_meets],
+                "conflicts": [x.code for x in peers if meets_overlap(o, x)],
+            }
+
+        others_ = sorted(
+            (
+                a
+                for a in cat.by_course.get(s.course_key, [])
+                if a.unique != s.unique and a.status != "cancelled" and passes_hard(a, cfg)
+            ),
+            key=lambda a: (
+                sum(meets_overlap(a, x) for x in peers),
+                rank.get(a.status, 3),
+                a.reserved,
+                a.unique,
+            ),
+        )
+        options = [option(s)] + [option(a) for a in others_[:9]]
         rows.append(
             {
+                "options": options,
+                "credits": s.credits,
                 "unique": s.unique,
                 "code": s.code,
                 "title": s.title,
@@ -634,6 +736,7 @@ def section_json(s: Sec, scorer: Scorer | None = None) -> dict:
 
 def schedule_json(sch: Schedule, scorer: Scorer) -> dict:
     return {
+        "wish_included": sch.wish_included,
         "credits": sch.credits,
         "utility": round(sch.utility, 4),
         "slots": sch.slots,

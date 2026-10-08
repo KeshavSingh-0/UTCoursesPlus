@@ -3,6 +3,8 @@ machine except language-model calls for audit parsing, syllabus extraction and p
 
 import os
 import threading
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -14,26 +16,41 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from . import llm, nlpref, prefs, requirements, schedule, signals, syllabus
+from . import coursedocs, llm, nlpref, prefs, requirements, schedule, signals, syllabus
 from .buildings import Buildings
 from .catalog import CORE_NAMES, Catalog, core_tree, when_text
 from .config import DATA_DIR, TERM
 from .db import connect
-from .fetch import BlockedError
+from .fetch import BlockedError, Fetcher, SessionExpired, load_cookies
 from .models import CORE_AREAS
 from .quality import report
 
 UT_RMP_SCHOOL_ID = "1255"
 
 
+@dataclass
+class Job:
+    id: str
+    kind: str
+    state: str = "running"  # running | done | error
+    lines: list[str] = field(default_factory=list)
+    result: object = None
+    error: str | None = None
+
+
 class State:
     def __init__(self, db_path: Path | str | None = None):
+        self.db_path = db_path
         self.con = connect(db_path)
         self.lock = threading.RLock()
         self.buildings = Buildings.load()
         self._cat: Catalog | None = None
         self._sig: signals.SignalIndex | None = None
         self.last_top: schedule.Schedule | None = None
+        self.jobs: dict[str, Job] = {}
+        # replaceable in tests
+        self.fetcher_factory = lambda: Fetcher(cookies=load_cookies())
+        self.llm_client_factory = llm.get_client
 
     def invalidate(self) -> None:
         self._cat = None
@@ -50,6 +67,44 @@ class State:
         if self._sig is None:
             self._sig = signals.SignalIndex(self.con, self.cat.instructor_depts())
         return self._sig
+
+    def start_job(self, kind: str, work) -> Job:
+        """Run work(connection, progress) on a thread with its own database connection. One job at a time so
+        the request spacing to UT's servers is never exceeded."""
+        if any(j.state == "running" for j in self.jobs.values()):
+            raise RuntimeError("Another job is still running. Wait for it to finish.")
+        job = Job(id=uuid.uuid4().hex[:10], kind=kind)
+        self.jobs[job.id] = job
+
+        def run():
+            con = connect(self.db_path)
+            try:
+                job.result = work(con, job.lines.append)
+                job.state = "done"
+            except SessionExpired as e:
+                job.error, job.state = (
+                    f"Your UT login is missing or expired ({e}). Run uv run utcoursesplus login in a terminal, then try again.",
+                    "error",
+                )
+            except BlockedError as e:
+                job.error, job.state = (
+                    f"The site blocked or refused a request ({e}). Stopped. Do not retry now.",
+                    "error",
+                )
+            except (llm.LLMUnavailable, ValueError) as e:
+                job.error, job.state = str(e), "error"
+            except (anthropic.APIError, httpx.HTTPError) as e:
+                job.error, job.state = (
+                    f"A network or model call failed ({type(e).__name__}: {str(e)[:160]}).",
+                    "error",
+                )
+            finally:
+                con.close()
+                with self.lock:
+                    self.invalidate()
+
+        threading.Thread(target=run, daemon=True).start()
+        return job
 
 
 class AuditIn(BaseModel):
@@ -79,6 +134,14 @@ class SyllabusIn(BaseModel):
     url: str | None = None
     instructor: str | None = None
     term: str | None = None
+
+
+class FindIn(BaseModel):
+    courses: list[str]
+
+
+class ReadIn(BaseModel):
+    doc_ids: list[int]
 
 
 class CsvIn(BaseModel):
@@ -227,11 +290,21 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             bad = [c for c in req.core_areas if c not in valid]
             if bad:
                 fail(422, f"Unknown Core area codes: {', '.join(bad)}.")
-            fixed, unknown = [], []
-            for c in req.required_courses:
-                rc = requirements.resolve_code(c, st.cat)
-                (fixed if rc else unknown).append(rc or c)
-            req.required_courses = list(dict.fromkeys(fixed))
+            unknown: list[str] = []
+
+            def clean(codes: list[str]) -> list[str]:
+                out = []
+                for c in codes:
+                    rc = requirements.resolve_code(c, st.cat)
+                    if rc is None:
+                        unknown.append(c)
+                    elif rc not in out:
+                        out.append(rc)
+                return out
+
+            req.required_courses = clean(req.required_courses)
+            # a course is either required or "like to take", never both; the ranking is the list order
+            req.preferred_courses = [c for c in clean(req.preferred_courses) if c not in req.required_courses]
             requirements.save(st.con, req)
             return {"requirements": req.model_dump(), "not_in_schedule": unknown}
 
@@ -503,6 +576,126 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
                 return out
 
         return guard_llm(run)
+
+    # ------------------------------------------------------------------ course-site syllabi (selected courses only)
+    def spring_instructors(code: str) -> list[str]:
+        names = {n for s in st.cat.by_code.get(code, []) for n in s.instructors}
+        return sorted(names)
+
+    @app.get("/api/syllabi/overview")
+    def syllabi_overview():
+        import json as _json
+
+        with st.lock:
+            coursedocs.ensure(st.con)
+            st.con.executescript(syllabus.SCHEMA_SQL)
+            req = requirements.load(st.con)
+            roles = {c: "required" for c in req.required_courses}
+            roles.update({c: "like to take" for c in req.preferred_courses})
+            docs = {r["course"] for r in st.con.execute("SELECT DISTINCT course FROM syllabus_doc")}
+            read = {r["course"] for r in st.con.execute("SELECT DISTINCT course FROM syllabus")}
+            out = []
+            for code in list(roles) + sorted((docs | read) - set(roles)):
+                secs = st.cat.by_code.get(code, [])
+                d = {
+                    r["status"]: r["n"]
+                    for r in st.con.execute(
+                        "SELECT status, COUNT(*) AS n FROM syllabus_doc WHERE course=? GROUP BY status",
+                        (code,),
+                    )
+                }
+                reads = [
+                    dict(r)
+                    for r in st.con.execute(
+                        "SELECT id, term, instructor, source_url, source_kind, lightness, coverage, components_json FROM syllabus "
+                        "WHERE course=? ORDER BY id DESC",
+                        (code,),
+                    )
+                ]
+                for r in reads:
+                    r["components"] = _json.loads(r.pop("components_json"))
+                vals = [r["lightness"] for r in reads if r["lightness"] is not None]
+                out.append(
+                    {
+                        "code": code,
+                        "role": roles.get(code),
+                        "title": secs[0].title if secs else None,
+                        "instructors": spring_instructors(code),
+                        "docs": d,
+                        "syllabi": reads,
+                        "difficulty": (1 - sum(vals) / len(vals)) if vals else None,
+                    }
+                )
+            return {
+                "courses": out,
+                "session_saved": (DATA_DIR / "session" / "state.json").exists(),
+                "llm_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            }
+
+    @app.get("/api/syllabi/docs")
+    def syllabi_docs(course: str):
+        with st.lock:
+            coursedocs.ensure(st.con)
+            rows = st.con.execute(
+                "SELECT id, term_text, unique_no, title, instructors, url, kind, recommended, status, error FROM syllabus_doc "
+                "WHERE course=? ORDER BY year DESC, season DESC, unique_no",
+                (course.upper(),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def job_or_409(kind: str, work):
+        try:
+            return st.start_job(kind, work)
+        except RuntimeError as e:
+            fail(409, str(e))
+
+    @app.post("/api/syllabi/find")
+    def syllabi_find(body: FindIn):
+        with st.lock:
+            courses = {}
+            for c in body.courses[:40]:
+                code = requirements.resolve_code(c, st.cat) or c.strip().upper()
+                courses[code] = spring_instructors(code)
+        if not courses:
+            fail(422, "Select at least one course.")
+        try:
+            fetcher = st.fetcher_factory()
+        except SessionExpired:
+            fail(409, "No saved UT login. Run uv run utcoursesplus login in a terminal, then try again.")
+        job = job_or_409("find", lambda con, say: coursedocs.find_docs(con, fetcher, courses, say))
+        return {"job": job.id}
+
+    @app.post("/api/syllabi/read")
+    def syllabi_read(body: ReadIn):
+        if not body.doc_ids:
+            fail(422, "Select at least one syllabus.")
+        if len(body.doc_ids) > 30:
+            fail(422, "Read at most 30 syllabi at a time.")
+        try:
+            client = st.llm_client_factory()
+            fetcher = st.fetcher_factory()
+        except llm.LLMUnavailable as e:
+            fail(503, str(e))
+        except SessionExpired:
+            fail(409, "No saved UT login. Run uv run utcoursesplus login in a terminal, then try again.")
+        job = job_or_409(
+            "read", lambda con, say: coursedocs.read_docs(con, fetcher, body.doc_ids, client, say)
+        )
+        return {"job": job.id}
+
+    @app.get("/api/jobs/{job_id}")
+    def job_status(job_id: str):
+        j = st.jobs.get(job_id)
+        if not j:
+            fail(404, "No such job. The server may have restarted.")
+        return {
+            "id": j.id,
+            "kind": j.kind,
+            "state": j.state,
+            "lines": j.lines[-60:],
+            "error": j.error,
+            "result": j.result,
+        }
 
     # ------------------------------------------------------------------ static frontend
     dist = dist_dir or Path(__file__).resolve().parents[3] / "frontend" / "dist"

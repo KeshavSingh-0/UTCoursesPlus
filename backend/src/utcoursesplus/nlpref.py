@@ -36,6 +36,8 @@ keep the others near their current values. time_bias: -1 prefers mornings, +1 pr
 - "No classes before 10" -> hard.earliest_start_min = 600. "Keep Fridays free" -> hard.days_off \
 includes F. "Care more about workload than professor ratings" -> raise weights.ease and \
 weights.syllabus_lightness, lower weights.professor_quality.
+- weights.wishlist is how much the student values getting the courses they ranked as "like to take"; \
+raise it for requests such as "prioritize the classes I want".
 - For every changed field add a change entry: path, the exact phrase of the request that caused \
 it, and a one-sentence rationale.
 - If the request is ambiguous, or two asks contradict each other (for example the lightest \

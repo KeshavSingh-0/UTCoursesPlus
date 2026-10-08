@@ -351,3 +351,71 @@ def test_ranked_list_has_one_schedule_per_course_set_but_pool_keeps_alternatives
         PreferenceConfig.model_validate({"hard": {"credit_min": 0}}),
     )
     assert len(res.schedules) == 1 and len(res.pool) == 2
+
+
+@settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(catalogs(), st.integers(1, 4))
+def test_small_result_pool_returns_the_same_top_as_exhaustive_search(data, pool_size):
+    """Regression: the optimistic bound was scaled down, so once the pool was full the search pruned
+    branches that could still enter the top results."""
+    secs, n = data
+    req = Requirements(required_courses=[f"C S {300 + c}" for c in range(n)])
+    cfg = PreferenceConfig.model_validate({"hard": {"credit_min": 0}, "time_bias": -0.5})
+    original = S.POOL_SIZE
+    try:
+        S.POOL_SIZE = 10_000
+        full = S.generate(catalog(secs), req, cfg, idx(), k=pool_size)
+        S.POOL_SIZE = pool_size
+        small = S.generate(catalog(secs), req, cfg, idx(), k=pool_size)
+    finally:
+        S.POOL_SIZE = original
+    top = lambda r: [round(x.utility, 9) for x in r.pool][:pool_size]
+    assert top(small) == top(full)
+
+
+def test_like_to_take_courses_are_optional_and_rank_order_breaks_conflicts():
+    must = mk(1, "C S 312", days=("M", "W"), start=540, end=600)
+    first = mk(2, "ART 301", days=("T", "TH"), start=540, end=600)
+    second = mk(3, "PHL 301", days=("T", "TH"), start=550, end=610)  # clashes with the first choice
+    req = Requirements(required_courses=["C S 312"], preferred_courses=["ART 301", "PHL 301"])
+    cfg = PreferenceConfig.model_validate(
+        {"hard": {"credit_min": 0, "credit_max": 18}, "weights": {"wishlist": 1}}
+    )
+    res = run([must, first, second], req, cfg)
+    top = res.schedules[0]
+    assert {s.code for s in top.sections} == {"C S 312", "ART 301"} and top.wish_included == ["ART 301"]
+    req2 = Requirements(required_courses=["C S 312"], preferred_courses=["PHL 301", "ART 301"])
+    assert {s.code for s in run([must, first, second], req2, cfg).schedules[0].sections} == {
+        "C S 312",
+        "PHL 301",
+    }
+
+
+def test_like_to_take_skipped_when_it_would_break_the_credit_maximum():
+    secs = [mk(1, "C S 312"), mk(2, "M 408C", days=("T", "TH"), credits=4), mk(3, "ART 301", days=("F",))]
+    req = Requirements(required_courses=["C S 312"], preferred_courses=["M 408C", "ART 301"])
+    cfg = PreferenceConfig.model_validate(
+        {"hard": {"credit_min": 0, "credit_max": 6}, "weights": {"wishlist": 1}}
+    )
+    top = run(secs, req, cfg).schedules[0]
+    assert top.credits <= 6 and top.wish_included == [
+        "ART 301"
+    ]  # the top-ranked 4-credit course does not fit
+
+
+def test_wish_course_with_no_eligible_section_is_reported_not_fatal():
+    req = Requirements(required_courses=["C S 312"], preferred_courses=["Z 999"])
+    res = run([mk(1, "C S 312")], req, PreferenceConfig.model_validate({"hard": {"credit_min": 0}}))
+    assert res.schedules and any("Z 999" in n for n in res.notes)
+
+
+def test_interchangeable_elective_slots_do_not_repeat_the_same_schedule():
+    secs = [mk(1, "C S 312", days=("M",), start=540, end=600)]
+    for i in range(5):
+        secs.append(mk(100 + i, f"E 31{i}", days=("T", "TH"), start=480 + 70 * i, end=540 + 70 * i))
+    req = Requirements(required_courses=["C S 312"])
+    cfg = PreferenceConfig.model_validate({"hard": {"credit_min": 9, "credit_max": 9}})
+    res = run(secs, req, cfg, k=50)
+    sets = [frozenset(s.unique for s in sch.sections) for sch in res.pool]
+    assert len(sets) == len(set(sets)) == 10  # choose 2 of 5 electives, once each
+    assert res.nodes < 200

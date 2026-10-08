@@ -17,6 +17,7 @@ def test_weights_normalize_and_default_sum_to_one():
         few_gaps=0,
         walking=0,
         seat_availability=0,
+        wishlist=0,
     )
     assert w.ease == pytest.approx(0.5) and w.syllabus_lightness == pytest.approx(0.5)
 

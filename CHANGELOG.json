@@ -423,6 +423,54 @@
       ],
       "id": 8,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: like-to-take ranking, registration options, course-site syllabus pipeline; fix search pruning bound",
+      "summary": "Backend for three requests: (1) a ranked Like to Take list beside Required courses, (2) per-course ordered options for a keyboard registration runner, (3) reading UT's syllabus site for only the selected courses, with recent and same-instructor syllabi preferred.",
+      "files": [
+        "backend/src/utcoursesplus/{prefs,requirements,nlpref,schedule,signals,coursedocs,syllabus,fetch,db,api}.py",
+        "backend/tests/{test_schedule,test_signals,test_prefs,test_coursedocs,test_api,helpers}.py"
+      ],
+      "changes": [
+        {
+          "what": "Like to Take list",
+          "how": "Requirements.preferred_courses is an ordered list (position is the student's ranking). Each becomes an optional slot in the search; a new soft weight 'wishlist' (default 16%, renormalized with the rest) rewards the share of rank-weighted preferred courses a schedule includes (rank weight n for the best down to 1). A course is never both required and preferred. Courses with no eligible section are reported in notes instead of failing the search."
+        },
+        {
+          "what": "Optional slots and symmetry",
+          "how": "Preferred courses and electives may stay empty; the leaf check enforces the credit minimum. Interchangeable slots (electives, pick-N groups) take candidates in a fixed order so the same set is not generated in every permutation (choosing 2 of 5 electives now visits each pair once)."
+        },
+        {
+          "what": "Registration options",
+          "how": "Each registration step now carries up to ten ordered options for its course (the planned section first, then the others sorted by conflicts with the rest of the plan, then seat status), each with its meeting times and the course codes it would clash with, so the interface can re-check conflicts as sections are confirmed."
+        },
+        {
+          "what": "Syllabus site pipeline",
+          "how": "coursedocs.py searches utdirect.utexas.edu/apps/student/coursedocs once per selected course using the logged-in session, parses the results table, and recommends up to three syllabi: each current instructor's newest, then the newest recent ones (2022 on, honors sections excluded). Nothing is downloaded until the student ticks documents; then each file is downloaded, turned into text locally (PDF, Word .docx or HTML), and read with the quote-verified extraction. Jobs run one at a time on a background thread with their own database connection."
+        },
+        {
+          "what": "Averaging syllabi",
+          "how": "SignalIndex now averages an instructor's two newest syllabi, or up to three course-level ones when that instructor has none, and marks course-level evidence as slightly less certain."
+        },
+        {
+          "what": "Database",
+          "how": "WAL journal mode and a 15 second busy timeout so a background job can write while the app reads."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Branch-and-bound could discard schedules that belonged in the top results once the result pool was full",
+          "cause": "The optimistic bound multiplied the section term by the section weight share a second time, making it too low",
+          "fix": "Removed the extra factor; bound for optional slots uses the better of the current mean and the best remaining section. The earlier regression test passed even with the bug, so I replaced it with a property test (random catalogs, small pool against exhaustive search) and confirmed it fails with the bug restored."
+        }
+      ],
+      "notes": [
+        "The syllabus site is behind the same UT login as the schedule. UT's acceptable-use policy (sections 5.7 and 5.10) does not clearly permit scripted access there either, and the original instruction was to avoid login-gated syllabi unless the terms clearly allow it. The student chose to proceed; the design limits requests to selected courses (one search per course plus one download per ticked syllabus), throttled at 3 seconds, cached, read-only, and files are never shared.",
+        "The search form's parameter names were read from a saved page; the live request has not been run yet. Syllabi hosted on Simple Syllabus (outside links) are listed but not read.",
+        "Word .doc (old format) files cannot be read; they are reported and skipped."
+      ],
+      "id": 9,
+      "date": "2026-10-08"
     }
   ]
 }

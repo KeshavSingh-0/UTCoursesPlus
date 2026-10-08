@@ -34,6 +34,7 @@ class AuditParse(Strict):
 class Requirements(Strict):
     core_areas: list[str] = []  # codes still needed, one course each
     required_courses: list[str] = []
+    preferred_courses: list[str] = []  # "like to take", in the student's own ranking, best first
     groups: list[RequirementGroup] = []  # choose_from and elective groups
     elective_depts: list[str] = []  # limit electives to these departments; empty = any
     registration_time: str | None = None  # typed in by the user; never read from an account

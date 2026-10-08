@@ -241,6 +241,7 @@ class CourseSignal:
     # syllabus
     lightness: float | None = None
     lightness_coverage: float = 0.0
+    lightness_scope: str | None = None  # 'instructor' when the instructor's own syllabus was found
     # blended course ease score
     ease_score: float | None = None
     ease_score_lo: float | None = None
@@ -270,10 +271,16 @@ class SignalIndex:
         self.grades_by_course: dict[str, list[sqlite3.Row]] = {}
         for r in con.execute("SELECT * FROM grade"):
             self.grades_by_course.setdefault(course_code(r["dept"], r["number"]), []).append(r)
-        self.syllabus: dict[tuple[str, str | None], tuple[float, float]] = {}
+        # every stored syllabus, grouped by course and by (course, instructor); several are averaged
+        self.syllabus: dict[tuple[str, str | None], list[tuple[float, float]]] = {}
+        self.syllabus_by_course: dict[str, list[tuple[float, float]]] = {}
         try:
-            for r in con.execute("SELECT course, instructor_key, lightness, coverage FROM syllabus"):
-                self.syllabus[(r["course"], r["instructor_key"])] = (r["lightness"], r["coverage"])
+            for r in con.execute(
+                "SELECT course, instructor_key, lightness, coverage FROM syllabus WHERE lightness IS NOT NULL ORDER BY id DESC"
+            ):
+                pair = (r["lightness"], r["coverage"])
+                self.syllabus.setdefault((r["course"], r["instructor_key"]), []).append(pair)
+                self.syllabus_by_course.setdefault(r["course"], []).append(pair)
         except sqlite3.OperationalError:
             pass
         self.dept_gpa = self._dept_gpa()
@@ -375,13 +382,21 @@ class SignalIndex:
             sig.ease, sig.ease_lo, sig.ease_hi = z_to_ease(mean_z, sd_z)
             sig.rank_ease = _clip(sig.ease - RANK_PENALTY * (sig.ease_hi - sig.ease_lo) / 2)
 
-        # syllabus lightness: instructor-specific if present, else any syllabus for the course
-        found = next(((self.syllabus[(code, k)]) for k in keys if (code, k) in self.syllabus), None)
-        found = found or self.syllabus.get((code, None))
+        # syllabus lightness: the instructor's own syllabi if there are any (newest two averaged), otherwise
+        # any syllabus for the course
+        mine_syl = next((self.syllabus[(code, k)] for k in keys if (code, k) in self.syllabus), None)
+        found = mine_syl[:2] if mine_syl else None
+        scope = "instructor"
+        if not found:
+            found = self.syllabus.get((code, None)) or self.syllabus_by_course.get(code)
+            found = found[:3] if found else None
+            scope = "course"
         if found:
-            sig.lightness, sig.lightness_coverage = found
+            sig.lightness = sum(a for a, _ in found) / len(found)
+            sig.lightness_coverage = sum(b for _, b in found) / len(found)
+            sig.lightness_scope = scope
             sig.signals.append("syllabus")
-            half = 0.5 * (1 - sig.lightness_coverage) + 0.05
+            half = 0.5 * (1 - sig.lightness_coverage) + 0.05 + (0.05 if scope == "course" else 0.0)
             sig.rank_lightness = _clip(sig.lightness - RANK_PENALTY * half)
 
         # blended ease score: missing signals dropped, weights renormalized
@@ -389,7 +404,9 @@ class SignalIndex:
         if sig.ease is not None:
             parts.append((EASE_BLEND["difficulty"], sig.ease, sig.ease_lo, sig.ease_hi))
         if sig.lightness is not None:
-            half = 0.5 * (1 - sig.lightness_coverage) + 0.05
+            half = (
+                0.5 * (1 - sig.lightness_coverage) + 0.05 + (0.05 if sig.lightness_scope == "course" else 0.0)
+            )
             parts.append((EASE_BLEND["lightness"], sig.lightness, sig.lightness - half, sig.lightness + half))
         if parts:
             w = sum(p[0] for p in parts)

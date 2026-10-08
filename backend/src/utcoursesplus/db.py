@@ -46,6 +46,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     con = sqlite3.connect(p, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
+    con.execute("PRAGMA busy_timeout=15000")
+    if str(p) != ":memory:":
+        con.execute("PRAGMA journal_mode=WAL")  # a background job can write while the app reads
     con.executescript(SCHEMA)
     cols = {r["name"] for r in con.execute("PRAGMA table_info(section_tag)")}
     if "title" not in cols:  # database created by an earlier version: derived data, rebuild it

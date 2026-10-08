@@ -114,16 +114,47 @@ def test_ambiguous_instructor_name_is_not_matched():
 
 def test_syllabus_lightness_blends_with_difficulty_and_renormalizes():
     con = connect(":memory:")
-    con.execute("CREATE TABLE syllabus(course TEXT, instructor_key TEXT, lightness REAL, coverage REAL)")
-    con.execute("INSERT INTO syllabus VALUES('C S 429', NULL, 0.9, 1.0)")
+    con.execute(
+        "CREATE TABLE syllabus(id INTEGER PRIMARY KEY, course TEXT, instructor_key TEXT, lightness REAL, coverage REAL)"
+    )
+    con.execute(
+        "INSERT INTO syllabus(course, instructor_key, lightness, coverage) VALUES('C S 429', NULL, 0.9, 1.0)"
+    )
     idx = build(con)
     s = idx.estimate("C S 429", [])
     assert s.lightness == 0.9 and "syllabus" in s.signals
     assert min(s.ease, 0.9) <= s.ease_score <= max(s.ease, 0.9)
     only_syl = idx.estimate("Z 100", [])
     assert only_syl.ease_score is None
-    con.execute("INSERT INTO syllabus VALUES('Z 100', NULL, 0.2, 0.5)")
+    con.execute(
+        "INSERT INTO syllabus(course, instructor_key, lightness, coverage) VALUES('Z 100', NULL, 0.2, 0.5)"
+    )
     idx2 = S.SignalIndex(con)
     assert idx2.estimate("Z 100", []).ease_score == pytest.approx(
         0.2
     )  # only signal: weight renormalized to 1
+
+
+def test_instructors_own_syllabus_beats_course_average_and_several_are_averaged():
+    con = connect(":memory:")
+    con.execute(
+        "CREATE TABLE syllabus(id INTEGER PRIMARY KEY, course TEXT, instructor_key TEXT, lightness REAL, coverage REAL)"
+    )
+    for key, light in [
+        ("doe|j", 0.8),
+        ("doe|j", 0.6),
+        ("roe|r", 0.2),
+        ("doe|j", 0.1),
+    ]:  # newest first by id order
+        con.execute(
+            "INSERT INTO syllabus(course, instructor_key, lightness, coverage) VALUES('C S 429', ?, ?, 1.0)",
+            (key, light),
+        )
+    idx = S.SignalIndex(con)
+    mine = idx.estimate("C S 429", ["DOE, JANE"])
+    assert mine.lightness_scope == "instructor" and mine.lightness == pytest.approx(
+        (0.1 + 0.6) / 2
+    )  # two newest rows
+    other = idx.estimate("C S 429", ["SMITH, SAM"])
+    assert other.lightness_scope == "course" and other.lightness is not None
+    assert other.rank_lightness <= other.lightness  # course-level evidence is trusted a little less

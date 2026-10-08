@@ -191,3 +191,107 @@ def test_root_serves_built_frontend_when_present(tmp_path):
     (dist / "index.html").write_text("<html>app</html>")
     c = TestClient(create_app(tmp_path / "t.sqlite", dist_dir=dist))
     assert c.get("/").text == "<html>app</html>" and c.get("/courses").text == "<html>app</html>"
+
+
+def test_preferred_courses_are_ranked_deduplicated_and_never_also_required(client):
+    r = client.put(
+        "/api/requirements",
+        json={
+            "required_courses": ["C S 312"],
+            "preferred_courses": ["gov 310l", "C S 312", "M 408C", "gov 310l", "zz 1"],
+        },
+    ).json()
+    assert r["requirements"]["preferred_courses"] == ["GOV 310L", "M 408C"]
+    assert r["not_in_schedule"] == ["zz 1"]
+
+
+def test_wishlist_reaches_the_schedule_and_registration_options(client):
+    client.put(
+        "/api/requirements",
+        json={"required_courses": ["C S 312"], "preferred_courses": ["E 316L", "GOV 310L"]},
+    )
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0, "credit_max": 12})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={}).json()
+    top = r["schedules"][0]
+    assert top["wish_included"] and set(top["wish_included"]) <= {"E 316L", "GOV 310L"}
+    steps = r["registration"]["steps"]
+    cs = next(s for s in steps if s["code"] == "C S 312")
+    assert (
+        cs["options"][0]["unique"] == cs["unique"] and len(cs["options"]) == 2
+    )  # primary + the other section
+    assert all({"meets", "conflicts", "status"} <= set(o) for o in cs["options"])
+
+
+def _wait(c, job_id):
+    import time
+
+    for _ in range(200):
+        j = c.get(f"/api/jobs/{job_id}").json()
+        if j["state"] != "running":
+            return j
+        time.sleep(0.02)
+    raise AssertionError("job did not finish")
+
+
+def test_syllabus_find_and_read_jobs_with_stand_ins(client, tmp_path):
+    import httpx
+    from helpers import PAGE, make_docx
+
+    from utcoursesplus import syllabus as Y
+    from utcoursesplus.fetch import Fetcher
+
+    home = '<select id="id_department"><option value="C S">C S-Computer Sciences</option></select>'
+
+    def handler(req):
+        if "download" in req.url.path:
+            return httpx.Response(200, content=make_docx("Grading: two exams worth 20% each. " * 12))
+        return httpx.Response(200, text=PAGE if req.url.params.get("course_number") else home)
+
+    st = client.app.state.st
+    st.fetcher_factory = lambda: Fetcher(
+        cache_dir=tmp_path, client=httpx.Client(transport=httpx.MockTransport(handler)), min_interval=0
+    )
+    parsed = Y.SyllabusExtraction(exam_count=Y.QInt(value=2, quote="two exams worth 20% each"))
+
+    class Fake:
+        messages = None
+
+        def __init__(self):
+            self.messages = self
+
+        def parse(self, **kw):
+            class R:
+                stop_reason = "end_turn"
+                parsed_output = parsed
+
+            return R()
+
+    st.llm_client_factory = Fake
+    j = _wait(client, client.post("/api/syllabi/find", json={"courses": ["c s 439"]}).json()["job"])
+    assert j["state"] == "done", j
+    docs = client.get("/api/syllabi/docs", params={"course": "C S 439"}).json()
+    assert len(docs) == 4 and sum(d["recommended"] for d in docs) == 2
+    pick = [d["id"] for d in docs if d["recommended"]]
+    j2 = _wait(client, client.post("/api/syllabi/read", json={"doc_ids": pick}).json()["job"])
+    assert j2["state"] == "done" and all(r["ok"] for r in j2["result"])
+    ov = client.get("/api/syllabi/overview").json()
+    c = next(x for x in ov["courses"] if x["code"] == "C S 439")
+    assert len(c["syllabi"]) == 2 and c["difficulty"] is not None and c["docs"]["read"] == 2
+
+
+def test_syllabus_jobs_explain_missing_login_and_key(client, tmp_path, monkeypatch):
+    st = client.app.state.st
+    from utcoursesplus.fetch import SessionExpired
+
+    def no_session():
+        raise SessionExpired("none")
+
+    st.fetcher_factory = no_session
+    r = client.post("/api/syllabi/find", json={"courses": ["C S 312"]})
+    assert r.status_code == 409 and "uv run utcoursesplus login" in r.json()["detail"]
+    assert client.post("/api/syllabi/find", json={"courses": []}).status_code == 422
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    st.llm_client_factory = __import__("utcoursesplus.llm", fromlist=["get_client"]).get_client
+    assert client.post("/api/syllabi/read", json={"doc_ids": [1]}).status_code == 503

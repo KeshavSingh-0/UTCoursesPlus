@@ -18,16 +18,18 @@ WEIGHT_NAMES = [
     "few_gaps",
     "walking",
     "seat_availability",
+    "wishlist",
 ]
 DEFAULT_WEIGHTS = {
-    "ease": 0.24,
-    "syllabus_lightness": 0.16,
-    "professor_quality": 0.14,
-    "time_of_day": 0.10,
-    "compactness": 0.10,
-    "few_gaps": 0.10,
-    "walking": 0.06,
-    "seat_availability": 0.10,
+    "ease": 0.20,
+    "syllabus_lightness": 0.14,
+    "professor_quality": 0.12,
+    "time_of_day": 0.08,
+    "compactness": 0.08,
+    "few_gaps": 0.08,
+    "walking": 0.05,
+    "seat_availability": 0.09,
+    "wishlist": 0.16,
 }
 
 
@@ -98,6 +100,7 @@ class SoftWeights(Strict):
     few_gaps: float = Field(default=DEFAULT_WEIGHTS["few_gaps"], ge=0, le=1)
     walking: float = Field(default=DEFAULT_WEIGHTS["walking"], ge=0, le=1)
     seat_availability: float = Field(default=DEFAULT_WEIGHTS["seat_availability"], ge=0, le=1)
+    wishlist: float = Field(default=DEFAULT_WEIGHTS["wishlist"], ge=0, le=1)
 
     @model_validator(mode="after")
     def _normalize(self):

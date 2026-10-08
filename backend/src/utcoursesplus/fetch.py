@@ -138,8 +138,12 @@ class Fetcher:
             return body.read_bytes(), m.get("content_type", ""), datetime.fromisoformat(m["fetched_at"]), True
         r = self._request(url)
         ctype = r.headers.get("content-type", "")
-        if "text/html" in ctype and "captcha" in r.text.lower():
-            raise BlockedError(f"Block or CAPTCHA page returned for {url}")
+        if "text/html" in ctype:
+            low = r.text.lower()
+            if "samlrequest" in low:
+                raise SessionExpired("Login page returned. Run: uv run utcoursesplus login")
+            if "captcha" in low:
+                raise BlockedError(f"Block or CAPTCHA page returned for {url}")
         now = datetime.now(UTC)
         body.write_bytes(r.content)
         meta.write_text(json.dumps({"url": url, "fetched_at": now.isoformat(), "content_type": ctype}))

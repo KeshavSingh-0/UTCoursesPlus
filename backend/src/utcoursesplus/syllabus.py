@@ -331,12 +331,18 @@ def add_syllabus(
     term: str | None = None,
     client=None,
     fetcher: Fetcher | None = None,
+    source_url: str | None = None,
+    source_kind: str | None = None,
+    fetched_at: datetime | None = None,
 ) -> dict:
+    """Public address (url) is fetched here; text may instead be supplied by the caller, who may label where it
+    came from with source_url / source_kind."""
     if url:
         text, when = fetch_public_syllabus(fetcher or Fetcher(), url)
         kind = "public url"
     else:
-        when, kind = datetime.now(UTC), "pasted or file"
+        when, kind = fetched_at or datetime.now(UTC), source_kind or "pasted or file"
+        url = source_url
     if not text or len(text.strip()) < 200:
         raise ValueError(
             "Not enough syllabus text found (under 200 characters). It may be a scanned image; paste the text instead."
