@@ -124,19 +124,15 @@ def test_unknown_core_title_is_kept_as_unmapped_and_flags_keep_titles():
     assert ("core", "030", "Natural Science & Technology, Part I") in tags
 
 
-def test_continuation_row_adds_meeting_and_instructor():
+def test_empty_core_placeholder_and_tba_rows_from_real_markup():
     html = """<table class="results"><tbody>
-    <tr><td class="course_header"><h2>C S  429 SOFTWARE ENGINEERING</h2></td></tr>
-    <tr><td data-th="Unique"><a>11111</a></td><td data-th="Days"><span>MW</span></td>
-    <td data-th="Hour"><span>9:00 a.m.-10:00 a.m.</span></td><td data-th="Room"><span>GDC 1.304</span></td>
-    <td data-th="Instructor"><span>A, B</span></td><td data-th="Status">open</td></tr>
-    <tr><td data-th="Unique"></td><td data-th="Days"><span>F</span></td>
-    <td data-th="Hour"><span>9:00 a.m.-10:00 a.m.</span></td><td data-th="Room"><span>GDC 1.304</span></td>
-    <td data-th="Instructor"><span>C, D</span></td></tr></tbody></table>"""
-    p = parse_results(html, URL, NOW, term="20272")
-    assert len(p.sections) == 1
-    assert [m.days for m in p.sections[0].meetings] == [["M", "W"], ["F"]]
-    assert [i.name for i in p.sections[0].instructors] == ["A, B", "C, D"]
+    <tr><td class="course_header"><h2>C S  370 UNDERGRAD READING AND RESEARCH</h2></td></tr>
+    <tr><td data-th="Unique"><a>53205</a></td><td data-th="Days"></td><td data-th="Hour"></td>
+    <td data-th="Room"></td><td data-th="Instruction Mode">Face-to-face</td><td data-th="Instructor"></td>
+    <td data-th="Status">open; reserved</td><td data-th="Core"><div><ul class="core">
+    <li class="" title=" core curriculum requirement"></li></ul></div></td></tr></tbody></table>"""
+    s = parse_results(html, URL, NOW, term="20272").sections[0]
+    assert s.meetings == [] and s.instructors == [] and s.tags == [] and s.reserved
 
 
 def test_reparse_cache_rebuilds_without_requests(tmp_path):

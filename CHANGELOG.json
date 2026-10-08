@@ -157,6 +157,37 @@
         "Cause of the 37 sections without times and 68 without instructors is not yet known. They may be asynchronous online sections, staff-taught sections, or multi-row sections. Run diagnose and send data/diagnose.txt to confirm.",
         "28 tests pass. Not run against the user's cached pages, which live only on their machine."
       ]
+    },
+    {
+      "id": 4,
+      "date": "2026-10-08",
+      "commit_message": "refactor: drop unneeded continuation-row parsing; report empty pages",
+      "summary": "Real crawl output showed no multi-row sections, so the speculative continuation-row code is removed. Anomalies from the first crawl were explained by the data, not the parser.",
+      "files": [
+        "backend/src/utcoursesplus/{parse,quality}.py",
+        "backend/tests/test_parse_db.py"
+      ],
+      "changes": [
+        {
+          "what": "Removed _attach_continuation",
+          "how": "diagnose found 0 rows without a unique number in 292 sections, so the assumption was unsupported; the test for it was replaced with one built from the real markup."
+        },
+        {
+          "what": "Quality report",
+          "how": "Added empty_page_urls and by_mode."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Earlier report showed 237 sections with Core tags vs 102 in named areas",
+          "cause": "The registrar emits empty placeholder <li class=\"\" title=\" core curriculum requirement\"></li> on sections with no Core area; the first parser counted them as core tags",
+          "fix": "Entries with an empty label are skipped (done in 6b6bb14); verified: sections_with_core_tag is now 102 and unmapped_core_labels is empty. A test using the real markup now covers it."
+        }
+      ],
+      "notes": [
+        "37 sections without times are real: 24 Internet sections and 13 face-to-face research/reading courses with no meeting time. 68 sections have an empty instructor cell (staff/TBA). The schedule generator in Stage 5 must handle sections with no meeting time and no instructor.",
+        "No non-Core flags (writing, ethics, global cultures, etc.) appear in the C S results, so they may only exist on each section's detail page. A saved detail page is needed to confirm."
+      ]
     }
   ]
 }

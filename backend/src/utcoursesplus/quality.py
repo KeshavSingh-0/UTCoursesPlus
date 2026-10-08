@@ -73,6 +73,13 @@ def report(con: sqlite3.Connection) -> dict:
             "WHERE kind='flag' GROUP BY label, title"
         )
     }
+    r["empty_page_urls"] = [
+        row[0] for row in q("SELECT url FROM crawl_log WHERE n_sections=0 LIMIT 20")
+    ]
+    r["by_mode"] = {
+        str(row[0]): row[1]
+        for row in q("SELECT mode, COUNT(*) FROM section GROUP BY mode")
+    }
     r["unparseable_pages"] = [
         dict(x)
         for x in q("SELECT url, n_failures FROM crawl_log WHERE n_failures>0 LIMIT 20")

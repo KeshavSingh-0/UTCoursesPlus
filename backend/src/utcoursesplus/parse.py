@@ -79,27 +79,6 @@ def _parse_tags(td: Node | None, hint_core_code: str | None) -> list[Tag]:
     return tags
 
 
-def _attach_continuation(page: "ParsedPage", cells: dict, header_text: str) -> None:
-    """A row with no unique number that carries days/hours/instructors adds a meeting or an
-    instructor to the section above it (assumed layout for multi-meeting sections; unverified)."""
-    if not page.sections or page.sections[-1].course.title not in header_text:
-        return
-    last = page.sections[-1]
-    try:
-        extra = _parse_meetings(
-            _spans(cells.get("days")),
-            _spans(cells.get("hour")),
-            _spans(cells.get("room")),
-        )
-        names = [Instructor(name=n) for n in _spans(cells.get("instructor")) if n]
-    except ValueError as e:
-        page.failures.append(f"continuation row for {last.unique}: {e}")
-        return
-    known = {i.name for i in last.instructors}
-    last.meetings.extend(extra)
-    last.instructors.extend(i for i in names if i.name not in known)
-
-
 def _parse_meetings(
     days: list[str], hours: list[str], rooms: list[str]
 ) -> list[Meeting]:
@@ -174,8 +153,7 @@ def parse_results(
             for td in tr.css("td[data-th]")
         }
         uq = cells.get("unique")
-        if uq is None or not _clean(uq.text()):
-            _attach_continuation(page, cells, header_text)
+        if uq is None:
             continue
         unique = _clean(uq.text())
         try:
