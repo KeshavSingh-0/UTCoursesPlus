@@ -72,9 +72,9 @@ class Fetcher:
             timeout=30.0,
         )
 
-    def _paths(self, url: str) -> tuple[Path, Path]:
+    def _paths(self, url: str, ext: str = "html") -> tuple[Path, Path]:
         h = hashlib.sha256(url.encode()).hexdigest()
-        return self.cache_dir / f"{h}.html", self.cache_dir / f"{h}.json"
+        return self.cache_dir / f"{h}.{ext}", self.cache_dir / f"{h}.json"
 
     def _throttle(self) -> None:
         if self._last is not None:
@@ -83,11 +83,8 @@ class Fetcher:
                 self._sleep(wait)
         self._last = self._clock()
 
-    def get(self, url: str) -> Fetched:
-        body, meta = self._paths(url)
-        if body.exists() and meta.exists():
-            m = json.loads(meta.read_text())
-            return Fetched(url, body.read_text(), datetime.fromisoformat(m["fetched_at"]), True)
+    def _request(self, url: str) -> httpx.Response:
+        """One throttled GET with backoff; raises BlockedError / SessionExpired on any sign of a block."""
         backoff = 5.0
         for attempt in range(4):
             self._throttle()
@@ -113,14 +110,37 @@ class Fetcher:
                 backoff *= 2
                 continue
             r.raise_for_status()
-            text = r.text
-            low = text.lower()
-            if "captcha" in low or "access denied" in low or "unusual traffic" in low:
-                raise BlockedError(f"Block or CAPTCHA page returned for {url}")
-            if "samlrequest" in low:
-                raise SessionExpired("Login page returned. Run: uv run utcoursesplus login")
-            now = datetime.now(UTC)
-            body.write_text(text)
-            meta.write_text(json.dumps({"url": url, "fetched_at": now.isoformat(), "host": SCHEDULE_HOST}))
-            return Fetched(url, text, now, False)
+            return r
         raise BlockedError(f"Gave up on {url}")
+
+    def get(self, url: str) -> Fetched:
+        body, meta = self._paths(url)
+        if body.exists() and meta.exists():
+            m = json.loads(meta.read_text())
+            return Fetched(url, body.read_text(), datetime.fromisoformat(m["fetched_at"]), True)
+        r = self._request(url)
+        text = r.text
+        low = text.lower()
+        if "captcha" in low or "access denied" in low or "unusual traffic" in low:
+            raise BlockedError(f"Block or CAPTCHA page returned for {url}")
+        if "samlrequest" in low:
+            raise SessionExpired("Login page returned. Run: uv run utcoursesplus login")
+        now = datetime.now(UTC)
+        body.write_text(text)
+        meta.write_text(json.dumps({"url": url, "fetched_at": now.isoformat(), "host": SCHEDULE_HOST}))
+        return Fetched(url, text, now, False)
+
+    def get_bytes(self, url: str) -> tuple[bytes, str, datetime, bool]:
+        """Binary GET (PDFs). Returns (content, content_type, fetched_at, from_cache)."""
+        body, meta = self._paths(url, "bin")
+        if body.exists() and meta.exists():
+            m = json.loads(meta.read_text())
+            return body.read_bytes(), m.get("content_type", ""), datetime.fromisoformat(m["fetched_at"]), True
+        r = self._request(url)
+        ctype = r.headers.get("content-type", "")
+        if "text/html" in ctype and "captcha" in r.text.lower():
+            raise BlockedError(f"Block or CAPTCHA page returned for {url}")
+        now = datetime.now(UTC)
+        body.write_bytes(r.content)
+        meta.write_text(json.dumps({"url": url, "fetched_at": now.isoformat(), "content_type": ctype}))
+        return r.content, ctype, now, False

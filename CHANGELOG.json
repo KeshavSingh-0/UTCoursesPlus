@@ -244,6 +244,72 @@
       ],
       "id": 5,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: syllabus extraction, schedule generator, API and CLI commands",
+      "summary": "Stage 4 and the engine of Stage 5: quote-verified syllabus extraction with a documented lightness score and gold-set tools; requirements and Core tree; conflict-free schedule search with explanations, backups and a registration checklist; FastAPI service and CLI commands.",
+      "files": [
+        "backend/src/utcoursesplus/{syllabus,catalog,buildings,requirements,schedule,api,fetch,cli,db}.py",
+        "backend/tests/{test_syllabus,test_schedule,test_api,helpers}.py"
+      ],
+      "changes": [
+        {
+          "what": "Syllabus extraction",
+          "how": "The model fills a strict Pydantic schema (client.messages.parse). verify_quotes then nulls every value whose quote is not found, case and whitespace insensitive, in the syllabus text, so unsupported guesses never reach the score. Only public URLs are fetched: robots.txt is checked, login-gated hosts are refused, PDFs are read locally with pypdf."
+        },
+        {
+          "what": "Lightness score",
+          "how": "Nine components with fixed weights (exam count 0.20, exam weight 0.20, weekly hours 0.15, final 0.10, attendance 0.10, projects 0.10, participation 0.05, late policy 0.05, group work 0.05). Missing components are dropped and the rest renormalized; coverage is stored and shown. Every component's rule is a string returned to the UI."
+        },
+        {
+          "what": "Gold set",
+          "how": "gold-sheet writes a CSV of stored syllabi to fill by hand; gold-eval reports per-field labeled count, accuracy, false values and misses (numeric tolerance 5 points for weights, 1 hour for hours)."
+        },
+        {
+          "what": "Schedule generator",
+          "how": "Backtracking over slots (required courses, choose-from groups, Core areas, then electives to reach the credit minimum), most constrained slot first, pairwise overlap checks, credit ceiling, and branch-and-bound on an optimistic utility. A node budget returns best-found results and flags truncation. Candidate sections per slot are capped at the best 14 by section-level utility."
+        },
+        {
+          "what": "Utility",
+          "how": "Weighted mean of eight features in [0,1]; walking is dropped when data/buildings.csv is absent and the rest renormalized. Rank values for ease, lightness and quality subtract half the interval width, so low-confidence courses rank lower while remaining visible."
+        },
+        {
+          "what": "Explanations, backups, registration",
+          "how": "explain_vs lists the features with the largest weighted difference plus the sections that differ. backups picks alternates minimizing overlap with the top pick and each other. registration_plan scores scarcity from status, reserved seats, open alternatives and required status and attaches a fallback section; it is labeled a heuristic, and the registration time is typed in by the user."
+        },
+        {
+          "what": "API and CLI",
+          "how": "FastAPI app with endpoints for status, sources, requirements, audit parsing (shown for correction, never stored), Core tree, courses, preferences with propose/apply/undo, schedule generation, suggestions and imports. New CLI commands: serve, import-ratings, import-grades, add-syllabus, gold-sheet, gold-eval."
+        },
+        {
+          "what": "Fetcher",
+          "how": "Split into _request (throttle, backoff, block detection), get (text) and get_bytes (PDF) sharing the same safeguards."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "NameError: timezone not defined in fetch.py after refactor",
+          "cause": "ruff had rewritten timezone.utc to datetime.UTC and the new code still used timezone",
+          "fix": "use UTC"
+        },
+        {
+          "symptom": "Test for excluded section failed validation",
+          "cause": "The config validator correctly requires 5-digit unique numbers; the test used '9'",
+          "fix": "use '00009'"
+        },
+        {
+          "symptom": "A ratings CSV row 'Smith John' did not match 'SMITH, JOHN'",
+          "cause": "Without a comma the name is read as 'First Last'; 'Smith John' is ambiguous by construction",
+          "fix": "documented the accepted formats ('Last, First' or 'First Last') and fixed the test data"
+        }
+      ],
+      "notes": [
+        "Courses with a linked lab or discussion appear in the registrar schedule as separate rows; the generator does not know co-requisites and treats each as an independent course.",
+        "One course satisfies at most one Core slot in a schedule, even if it carries several Core tags.",
+        "The model call for syllabus, audit and preference parsing uses client.messages.parse; refusals and SDK errors are returned as plain-language API errors."
+      ],
+      "id": 6,
+      "date": "2026-10-08"
     }
   ]
 }

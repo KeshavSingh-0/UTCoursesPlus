@@ -43,7 +43,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     p = Path(path or DB_PATH)
     if str(p) != ":memory:":
         p.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(p)
+    con = sqlite3.connect(p, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)

@@ -54,6 +54,29 @@ def main(argv: list[str] | None = None) -> int:
     j = sub.add_parser("import-json", help="load sections from a JSON file")
     j.add_argument("file", type=Path)
     sub.add_parser("quality", help="data-quality report")
+    sv = sub.add_parser("serve", help="run the local web app")
+    sv.add_argument("--port", type=int, default=8000)
+    for name, hlp in (
+        ("import-ratings", "CSV of professor ratings"),
+        ("import-grades", "CSV of grade distributions"),
+    ):
+        ip = sub.add_parser(name, help=hlp)
+        ip.add_argument("file", type=Path)
+        if name == "import-grades":
+            ip.add_argument("--source", required=True, help="where the data came from")
+            ip.add_argument("--license-note", default="not stated", help="license or terms of the source")
+    sy = sub.add_parser(
+        "add-syllabus", help="extract fields from a public syllabus URL, a file, or pasted text"
+    )
+    sy.add_argument("course", help='e.g. "C S 312"')
+    sy.add_argument("--instructor")
+    sy.add_argument("--term")
+    sy.add_argument("--url")
+    sy.add_argument("--file", type=Path)
+    gs = sub.add_parser("gold-sheet", help="write a CSV to hand-label stored syllabi")
+    gs.add_argument("out", type=Path)
+    ge = sub.add_parser("gold-eval", help="per-field accuracy of extraction against your labels")
+    ge.add_argument("file", type=Path)
     sub.add_parser("reparse", help="rebuild crawled sections from cached pages (no requests)")
     sub.add_parser("diagnose", help="write raw example rows of anomalies to data/diagnose.txt")
     sub.add_parser("samples", help="print 5 random section rows")
@@ -75,6 +98,42 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Imported {n} sections.")
     elif a.cmd == "import-json":
         print(f"Imported {import_json(con, a.file)} sections.")
+    elif a.cmd == "serve":
+        import uvicorn
+
+        from .api import create_app
+
+        uvicorn.run(create_app(), host="127.0.0.1", port=a.port)
+    elif a.cmd == "import-ratings":
+        from .signals import import_ratings_csv
+
+        print(import_ratings_csv(con, a.file.read_text()))
+    elif a.cmd == "import-grades":
+        from .signals import import_grades_csv
+
+        print(import_grades_csv(con, a.file.read_text(), a.source, a.license_note))
+    elif a.cmd == "add-syllabus":
+        from .syllabus import add_syllabus, pdf_text
+
+        text = None
+        if a.file:
+            text = pdf_text(a.file.read_bytes()) if a.file.suffix.lower() == ".pdf" else a.file.read_text()
+        elif not a.url:
+            text = sys.stdin.read()
+        print(add_syllabus(con, a.course, text=text, url=a.url, instructor=a.instructor, term=a.term))
+    elif a.cmd == "gold-sheet":
+        from .syllabus import gold_sheet
+
+        print(
+            f"Wrote {gold_sheet(con, a.out)} rows to {a.out}. Fill the field columns; leave blank to skip, NA if not stated."
+        )
+    elif a.cmd == "gold-eval":
+        from .syllabus import gold_eval
+
+        for f, st in gold_eval(con, a.file).items():
+            print(
+                f"{f:24s} labeled {st['labeled']:3d}  accuracy {st['accuracy']}  false values {st['false_values']}  missed {st['missed']}"
+            )
     elif a.cmd == "reparse":
         from .rebuild import reparse_cache
 
