@@ -1,0 +1,14 @@
+# local data, session state, secrets
+data/
+backend/data/
+.env
+.env.*
+*.sqlite
+*.sqlite3
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+.DS_Store
