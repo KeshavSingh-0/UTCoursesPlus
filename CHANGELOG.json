@@ -384,7 +384,8 @@
       "files": [
         "backend/src/utcoursesplus/api.py",
         "backend/tests/test_api.py",
-        "README.md"
+        "README.md",
+        "backend/tests/test_api.py"
       ],
       "changes": [
         {
@@ -394,6 +395,10 @@
         {
           "what": "README commands",
           "how": "Setup steps are listed one per line with a note not to join them with a single &; trailing # comments were removed from command lines because zsh passes them to the program as arguments."
+        },
+        {
+          "what": "Injectable front-end folder",
+          "how": "create_app takes dist_dir so tests choose whether a built front end exists; added a test that a built front end is served at / and at client-side routes."
         }
       ],
       "bugs_fixed": [
@@ -406,6 +411,11 @@
           "symptom": "'unrecognized arguments: # open http://127.0.0.1:8000' when running the serve command",
           "cause": "zsh does not treat # as a comment in interactive shells, and the README line had a trailing comment",
           "fix": "Removed trailing comments from README command lines"
+        },
+        {
+          "symptom": "test_root_explains_missing_frontend_build failed on a machine that had built the front end (found after the previous push)",
+          "cause": "The test depended on whether frontend/dist existed on the machine running it",
+          "fix": "Pass a nonexistent dist_dir in the test. The earlier push went out with this one test failing because my command chain ignored pytest's result."
         }
       ],
       "notes": [

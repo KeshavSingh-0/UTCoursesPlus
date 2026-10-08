@@ -179,6 +179,15 @@ def test_syllabus_login_gated_url_rejected(client):
     )
 
 
-def test_root_explains_missing_frontend_build(client):
-    r = client.get("/")
+def test_root_explains_missing_frontend_build(tmp_path):
+    c = TestClient(create_app(tmp_path / "t.sqlite", dist_dir=tmp_path / "no-such-dist"))
+    r = c.get("/")
     assert r.status_code == 200 and "npm install && npm run build" in r.text
+
+
+def test_root_serves_built_frontend_when_present(tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html>app</html>")
+    c = TestClient(create_app(tmp_path / "t.sqlite", dist_dir=dist))
+    assert c.get("/").text == "<html>app</html>" and c.get("/courses").text == "<html>app</html>"
