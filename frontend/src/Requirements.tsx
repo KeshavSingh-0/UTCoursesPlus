@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Trash2 } from "lucide-react";
 import { api, ApiError, f2 } from "./api";
 import type { CoreArea, Group, Requirements as Req, Section, Status, Suggestion } from "./api";
+import { IdaImport } from "./IdaImport";
 import { Confidence, Interval, NoData, Note, PageHead, StatusText } from "./ui";
 
 type Tree = { code: string; name: string; n_courses: number }[];
@@ -157,6 +158,7 @@ export function RequirementsScreen({ status }: { status: Status }) {
         </div>
       </section>
 
+      <IdaImport areas={areas} onApplied={(r) => setReq(r)} />
       <AuditPaste onApplied={(r) => setReq(r)} />
     </div>
   );

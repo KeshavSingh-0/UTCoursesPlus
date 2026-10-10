@@ -15,7 +15,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from . import coursedocs, llm, nlpref, plantree, prefs, requirements, schedule, settings, signals, syllabus
+from . import (
+    coursedocs,
+    ida,
+    llm,
+    nlpref,
+    plantree,
+    prefs,
+    requirements,
+    schedule,
+    settings,
+    signals,
+    syllabus,
+)
 from .buildings import Buildings
 from .catalog import CORE_NAMES, Catalog, core_tree, when_text
 from .config import DATA_DIR, TERM
@@ -155,6 +167,23 @@ class AddUniqueIn(BaseModel):
 class CompareIn(BaseModel):
     code: str
     uniques: list[str] | None = None
+
+
+class IdaParseIn(BaseModel):
+    html: str
+
+
+class IdaRuleChoice(BaseModel):
+    segments: list[list[str]]
+    mode: str = "defer"  # required | defer
+    text: str = ""
+
+
+class IdaApplyIn(BaseModel):
+    completed: list[str] = []
+    core: dict[str, str] = {}  # area code -> required | like | defer
+    core_hours: dict[str, float] = {}
+    rules: list[IdaRuleChoice] = []
 
 
 class FindIn(BaseModel):
@@ -349,6 +378,10 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
                 if rc and good:
                     pins[rc] = good
             req.pinned_sections = pins
+            req.completed_courses = list(
+                dict.fromkeys(" ".join(c.upper().split()) for c in req.completed_courses if c.strip())
+            )
+            req.core_slots = {a: max(1, min(int(n), 6)) for a, n in req.core_slots.items() if a in valid_core}
             requirements.save(st.con, req)
             return {"requirements": req.model_dump(), "not_in_schedule": unknown}
 
@@ -369,11 +402,74 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             requirements.save(st.con, req)
             return {"requirements": req.model_dump(), "warnings": warnings}
 
+    # ------------------------------------------------------------------ degree audit (IDA) import, read locally
+    @app.post("/api/requirements/ida/parse")
+    def ida_parse(body: IdaParseIn):
+        if len(body.html) > 8_000_000:
+            fail(422, "That file is larger than 8 MB, so it is probably not an audit results page.")
+        r = ida.parse_ida(body.html)
+        if not r.courses and not r.core_needs and not r.notes:
+            fail(
+                422,
+                "No courses or requirements were found. Save the audit's Results page (File > Save Page As, HTML only) and choose that file.",
+            )
+        return {**r.as_dict(), "stored": False}
+
+    @app.post("/api/requirements/ida/apply")
+    def ida_apply(body: IdaApplyIn):
+        with st.lock:
+            req = requirements.load(st.con)
+            valid = {a.code for a in CORE_AREAS}
+            req.completed_courses = list(
+                dict.fromkeys(
+                    [*req.completed_courses, *(" ".join(c.upper().split()) for c in body.completed)]
+                )
+            )
+            warnings: list[str] = []
+            for code, mode in body.core.items():
+                if code not in valid:
+                    warnings.append(f"Unknown Core code {code} was ignored.")
+                    continue
+                tok = f"core:{code}"
+                req.core_areas = [c for c in req.core_areas if c != code]
+                req.preferred_courses = [c for c in req.preferred_courses if c != tok]
+                if mode == "required":
+                    req.core_areas.append(code)
+                elif mode == "like":
+                    req.preferred_courses.append(tok)
+                hours = body.core_hours.get(code)
+                if hours and mode in ("required", "like"):
+                    req.core_slots[code] = max(1, min(6, round(hours / 3)))
+            for rule in body.rules:
+                if rule.mode != "required":
+                    continue
+                for seg in rule.segments:
+                    codes = [c for c in (requirements.resolve_code(x, st.cat) for x in seg) if c]
+                    codes = [c for c in codes if c not in req.completed_courses]
+                    if not codes:
+                        warnings.append(
+                            f"None of {', '.join(seg)} is offered in Spring 2027 or not already taken, so it was left out."
+                        )
+                    elif len(codes) == 1:
+                        if codes[0] not in req.required_courses:
+                            req.required_courses.append(codes[0])
+                    else:
+                        req.groups.append(
+                            requirements.RequirementGroup(
+                                name=rule.text[:80] or "Choose one", kind="choose_from", courses=codes, pick=1
+                            )
+                        )
+            req.required_courses = [c for c in req.required_courses if c not in req.completed_courses]
+            req.preferred_courses = [c for c in req.preferred_courses if c not in req.completed_courses]
+            requirements.save(st.con, req)
+            st.invalidate()
+            return {"requirements": req.model_dump(), "warnings": warnings}
+
     @app.get("/api/core/tree")
     def tree(areas: str | None = None):
         with st.lock:
             codes = [a for a in (areas.split(",") if areas else requirements.load(st.con).core_areas) if a]
-            return core_tree(st.cat, codes)
+            return core_tree(st.cat, codes, set(requirements.load(st.con).completed_courses))
 
     # ------------------------------------------------------------------ courses
     @app.get("/api/courses")
@@ -383,6 +479,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
         with st.lock:
             sc = schedule.Scorer(prefs.current(st.con), st.sig, st.buildings)
             ql = q.strip().lower()
+            done = set(requirements.load(st.con).completed_courses)
             rows = []
             for s in st.cat.sections.values():
                 if dept and s.dept != dept:
@@ -402,6 +499,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             for s in rows[:limit]:
                 sg = sc.signal(s)
                 d = schedule.section_json(s)
+                d["taken"] = s.code in done
                 d["signal"] = {
                     k: getattr(sg, k)
                     for k in (
@@ -678,8 +776,9 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             cfg = prefs.current(st.con)
             sc = schedule.Scorer(cfg, st.sig, st.buildings)
             groups: dict[str, list] = {}
+            done = set(requirements.load(st.con).completed_courses)
             for s in st.cat.active():
-                if core in s.core:
+                if core in s.core and s.code not in done:
                     groups.setdefault(s.course_key, []).append(s)
             rows = []
             for secs in groups.values():

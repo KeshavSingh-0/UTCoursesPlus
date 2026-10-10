@@ -521,3 +521,63 @@ def test_explanations_use_the_wishlist_weight_when_there_is_a_wishlist(client):
     assert (
         client.post("/api/schedules/generate", json={"k": 5}).json()["weights"]["wishlist"] == 0
     )  # no wishlist, no weight
+
+
+def test_ida_parse_and_apply_through_the_api(client):
+    from helpers import ida_html
+
+    r = client.post("/api/requirements/ida/parse", json={"html": ida_html()})
+    assert r.status_code == 200 and r.json()["stored"] is False and "Test Student" not in r.text
+    p = r.json()
+    assert (
+        client.post("/api/requirements/ida/parse", json={"html": "<html>nothing</html>"}).status_code == 422
+    )
+    out = client.post(
+        "/api/requirements/ida/apply",
+        json={
+            "completed": p["completed_codes"],
+            "core": {"070": "required", "050": "like", "030": "defer"},
+            "core_hours": {"070": 6, "050": 3},
+            "rules": [],
+        },
+    ).json()
+    req = out["requirements"]
+    assert (
+        req["core_areas"] == ["070"]
+        and req["preferred_courses"] == ["core:050"]
+        and req["core_slots"] == {"070": 2, "050": 1}
+    )
+    assert "C S 312" in req["completed_courses"] and "M 408C" not in req["completed_courses"]
+
+
+def test_completed_courses_are_never_offered_or_planned(client):
+    client.put(
+        "/api/requirements",
+        json={
+            "required_courses": ["C S 312", "M 408C"],
+            "completed_courses": ["c s  312"],
+            "core_areas": ["020"],
+        },
+    )
+    req = client.get("/api/requirements").json()
+    assert req["completed_courses"] == ["C S 312"]
+    assert "C S 312" not in req["required_courses"]
+    rows = client.get("/api/courses", params={"q": "intro"}).json()["rows"]
+    assert all(r["taken"] for r in rows if r["code"] == "C S 312")
+    sug = client.get("/api/suggestions", params={"core": "020"}).json()
+    assert "C S 312" not in [c["code"] for c in sug["courses"]]
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={}).json()
+    assert all("C S 312" not in sc["slots"] for sc in r["schedules"])
+    assert not any("C S 312" in p for p in r["problems"])
+
+
+def test_a_core_area_that_needs_two_courses_gets_two_slots(client):
+    client.put("/api/requirements", json={"core_areas": ["080"], "core_slots": {"080": 2}})
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={}).json()
+    assert r["schedules"] == [] or len(r["schedules"][0]["sections"]) == 2

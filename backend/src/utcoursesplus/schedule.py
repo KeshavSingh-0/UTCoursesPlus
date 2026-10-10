@@ -244,15 +244,20 @@ def build_slots(
     slots: list[Slot] = []
     taken: set[str] = set(req.required_courses)
     pins = req.pinned_sections
+    done = set(req.completed_courses)
 
     def ok(s: Sec) -> bool:
-        return passes_hard(s, cfg) and (not pins.get(s.code) or s.unique in pins[s.code])
+        return (
+            s.code not in done and passes_hard(s, cfg) and (not pins.get(s.code) or s.unique in pins[s.code])
+        )
 
     for code in req.required_courses:
         secs = [s for s in cat.by_code.get(code, []) if ok(s)]
         if not secs:
             total = len(cat.by_code.get(code, []))
-            if pins.get(code):
+            if code in done:
+                why = "your degree audit shows you have already taken this course or an equivalent."
+            elif pins.get(code):
                 why = (
                     f"none of the {len(pins[code])} section(s) you pinned ({', '.join(pins[code])}) "
                     "fit your constraints, or they are cancelled."
@@ -284,9 +289,19 @@ def build_slots(
         pool = [
             s for s in cat.active() if code in s.core and s.code not in taken and ok(s) and s.level != "G"
         ]
+        n = max(1, req.core_slots.get(code, 1))
         if not pool:
             problems.append(f"{CORE_NAMES.get(code, code)}: no eligible sections.")
-        slots.append(Slot(CORE_NAMES.get(code, code), "core", _best_per_course(pool, scorer, CAND_PER_SLOT)))
+        for i in range(n):
+            label = CORE_NAMES.get(code, code) + (f" ({i + 1} of {n})" if n > 1 else "")
+            slots.append(
+                Slot(
+                    label,
+                    "core",
+                    _best_per_course(pool, scorer, CAND_PER_SLOT),
+                    group=f"core:{code}" if n > 1 else "",
+                )
+            )
 
     base = sum(min((s.credits for s in sl.candidates), default=3) for sl in slots)
     prefs_ = wish_keys(req)
@@ -301,21 +316,29 @@ def build_slots(
         else:
             label = tok
             secs = [s for s in cat.by_code.get(tok, []) if ok(s)]
+            if tok in done:
+                notes.append(
+                    f"{tok} (like to take) is already taken according to your degree audit, so it is left out."
+                )
+                continue
         if not secs:
             notes.append(
                 f"{label} (like to take) has no eligible sections under your constraints, so it is left out."
             )
             continue
-        slots.append(
-            Slot(
-                label,
-                "wish",
-                _best_per_course(secs, scorer, CAND_PER_SLOT),
-                "Like to take",
-                optional=True,
-                wish_key=tok,
+        n = max(1, req.core_slots.get(tok[5:], 1)) if tok.startswith("core:") else 1
+        for i in range(n):
+            slots.append(
+                Slot(
+                    label + (f" ({i + 1} of {n})" if n > 1 else ""),
+                    "wish",
+                    _best_per_course(secs, scorer, CAND_PER_SLOT),
+                    "Like to take",
+                    optional=True,
+                    wish_key=tok,
+                    group=f"wish:{tok}" if n > 1 else "",
+                )
             )
-        )
     need = max(0, math.ceil((cfg.hard.credit_min - base) / 3))
     if need:
         used_codes = taken | {s.code for sl in slots for s in sl.candidates if sl.kind == "required"}
@@ -498,7 +521,7 @@ def generate(
                 return
             if not chosen:
                 return
-            keys = [m[2] for m in chosen_meta if m[2]]
+            keys = list(dict.fromkeys(m[2] for m in chosen_meta if m[2]))
             u, feats, contrib = scorer.utility(chosen, keys)
             sch = Schedule(
                 list(chosen),

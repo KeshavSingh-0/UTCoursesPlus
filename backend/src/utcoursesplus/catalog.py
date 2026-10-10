@@ -134,13 +134,13 @@ class Catalog:
         return out
 
 
-def core_tree(cat: Catalog, area_codes: list[str]) -> list[dict]:
+def core_tree(cat: Catalog, area_codes: list[str], exclude: set[str] | None = None) -> list[dict]:
     """area -> department -> course -> section counts, from the registrar's own Core tags."""
     tree = []
     for code in area_codes:
         depts: dict[str, dict[str, dict]] = {}
         for s in cat.sections.values():
-            if code in s.core:
+            if code in s.core and s.code not in (exclude or set()):
                 c = depts.setdefault(s.dept, {}).setdefault(
                     s.course_key,
                     {"code": s.code, "title": s.title, "credits": s.credits, "sections": 0, "open": 0},

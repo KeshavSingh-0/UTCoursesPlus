@@ -626,6 +626,50 @@
       ],
       "id": 12,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat(ida): import completed courses and open requirements from a saved degree audit",
+      "date": "2026-10-10",
+      "summary": "The saved IDA Results page is read on this computer with a deterministic parser (no language model). Finished and in-progress courses are excluded from search, suggestions and plans; open Core needs and course rules are triaged on the Requirements screen.",
+      "files": [
+        "backend/src/utcoursesplus/ida.py",
+        "backend/src/utcoursesplus/requirements.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/catalog.py",
+        "backend/src/utcoursesplus/plantree.py",
+        "backend/tests/test_ida.py",
+        "backend/tests/test_api.py",
+        "frontend/src/IdaImport.tsx",
+        "frontend/src/Requirements.tsx",
+        "frontend/src/api.ts"
+      ],
+      "changes": [
+        {
+          "what": "IDA parser",
+          "how": "selectolax over the coursework and categories tables; registrar Core codes mapped (031 to 093); Future/Planned rows skipped with a warning; name and EID never read"
+        },
+        {
+          "what": "Core slots",
+          "how": "A Core area lacking 6 hours becomes two slots in the schedule search"
+        },
+        {
+          "what": "Import screen",
+          "how": "Choose the saved file, review each open Core area and course rule as Required now, Like to take or Not this semester, then save"
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "A course marked completed could stay in the required list",
+          "cause": "Nothing reconciled the two lists and a test assertion ended in 'or True' so it never failed",
+          "fix": "Requirements validator drops completed courses from required and preferred lists; test asserts it"
+        }
+      ],
+      "notes": [
+        "Your audit is the entry-level CS audit, so later major requirements are not listed.",
+        "The raw file is not stored or committed."
+      ],
+      "id": 13
     }
   ]
 }

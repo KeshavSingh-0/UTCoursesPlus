@@ -33,11 +33,23 @@ def _sec(s: Sec) -> dict:
 
 
 def _alternatives(
-    cat: Catalog, cfg: PreferenceConfig, scorer: Scorer, area: str, skip_code: str, limit: int = 4
+    cat: Catalog,
+    cfg: PreferenceConfig,
+    scorer: Scorer,
+    area: str,
+    skip_code: str,
+    limit: int = 4,
+    exclude: frozenset[str] = frozenset(),
 ) -> list[dict]:
     groups: dict[str, list[Sec]] = {}
     for s in cat.active():
-        if area in s.core and s.code != skip_code and passes_hard(s, cfg) and s.level != "G":
+        if (
+            area in s.core
+            and s.code != skip_code
+            and s.code not in exclude
+            and passes_hard(s, cfg)
+            and s.level != "G"
+        ):
             groups.setdefault(s.course_key, []).append(s)
     rows = []
     for secs in groups.values():
@@ -115,7 +127,9 @@ def plan_tree(
         if kind == "core" or (kind == "wish" and wkey.startswith("core:")):
             area = AREA_BY_NAME.get(label) or (wkey[5:] if wkey.startswith("core:") else "")
             item["area"] = CORE_NAMES.get(area, label)
-            item["alternatives"] = _alternatives(cat, cfg, scorer, area, sec.code)
+            item["alternatives"] = _alternatives(
+                cat, cfg, scorer, area, sec.code, exclude=frozenset(req.completed_courses)
+            )
         groups[GROUP_OF[kind]].append(item)
     included = set(top.wish_included)
     for tok in req.preferred_courses:

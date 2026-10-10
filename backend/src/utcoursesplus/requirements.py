@@ -7,7 +7,7 @@ import re
 import sqlite3
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from . import llm
 from .catalog import Catalog
@@ -39,9 +39,22 @@ class Requirements(Strict):
     preferred_courses: list[str] = []
     # course code -> unique numbers the student will accept; empty or missing means any section
     pinned_sections: dict[str, list[str]] = {}
+    # courses already taken or in progress (and their equivalents), from a degree audit; never planned again
+    completed_courses: list[str] = []
+    # Core area code -> how many courses it still needs (6 hours of government is two); default 1
+    core_slots: dict[str, int] = {}
     groups: list[RequirementGroup] = []  # choose_from and elective groups
     elective_depts: list[str] = []  # limit electives to these departments; empty = any
     registration_time: str | None = None  # typed in by the user; never read from an account
+
+    @model_validator(mode="after")
+    def _drop_completed(self):
+        norm = [" ".join(c.upper().split()) for c in self.completed_courses]
+        self.completed_courses = list(dict.fromkeys(norm))
+        done = set(self.completed_courses)
+        self.required_courses = [c for c in self.required_courses if " ".join(c.upper().split()) not in done]
+        self.preferred_courses = [c for c in self.preferred_courses if " ".join(c.upper().split()) not in done]
+        return self
 
 
 def _ensure(con: sqlite3.Connection) -> None:

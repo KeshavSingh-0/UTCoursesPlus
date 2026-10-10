@@ -41,7 +41,7 @@ export type Section = {
 };
 export type CoreArea = { code: string; name: string };
 export type Group = { name: string; kind: "core_area" | "required_course" | "choose_from" | "elective"; core_code: string | null; courses: string[]; pick: number; credit_hours_needed: number | null };
-export type Requirements = { core_areas: string[]; required_courses: string[]; preferred_courses: string[]; pinned_sections: Record<string, string[]>; groups: Group[]; elective_depts: string[]; registration_time: string | null };
+export type Requirements = { completed_courses?: string[]; core_slots?: Record<string, number>; core_areas: string[]; required_courses: string[]; preferred_courses: string[]; pinned_sections: Record<string, string[]>; groups: Group[]; elective_depts: string[]; registration_time: string | null };
 export type TimeBlock = { days: string[]; start_min: number; end_min: number };
 export type Hard = {
   earliest_start_min: number | null; latest_end_min: number | null; days_off: string[]; max_gap_min: number | null; max_walk_min: number | null;
