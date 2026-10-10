@@ -142,7 +142,7 @@ export function SyllabiScreen() {
               </table>
             </details>
           ))}
-          {!ov.llm_configured ? <Note><p>ANTHROPIC_API_KEY is not set, so reading is disabled. Set it in the terminal that runs the server and restart.</p></Note> : null}
+          {!ov.llm_configured ? <Note><p>No API key is set, so reading is disabled. Paste one on the <a href="#models">AI models</a> screen.</p></Note> : null}
           <p className="small muted" style={{ margin: "6px 0", maxWidth: "75ch" }}>Each syllabus is turned into text on this computer and sent to the model once. That is usually a few cents each, so ten syllabi is typically under a dollar.</p>
           <button className="btn primary" disabled={!ticked.size || running || !ov.llm_configured || !ov.session_saved} onClick={read}>
             {running && job?.kind === "read" ? "Reading" : `Read ${ticked.size} syllabus${ticked.size === 1 ? "" : "es"}`}

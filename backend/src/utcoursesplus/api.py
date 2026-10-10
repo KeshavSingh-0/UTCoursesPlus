@@ -500,6 +500,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
         cfg.hard.required_courses = req.required_courses
         res = schedule.generate(st.cat, req, cfg, st.sig, st.buildings, k=max(1, min(k, 25)))
         scorer = schedule.Scorer(cfg, st.sig, st.buildings)
+        scorer.wish = schedule.wish_weights(req)
         w = scorer.weights()
         out: dict[str, Any] = {
             "problems": res.problems,

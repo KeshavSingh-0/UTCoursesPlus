@@ -501,3 +501,23 @@ def test_plan_map_groups_the_plan_and_explains_what_was_left_out(client):
     like = next(g for g in t["groups"] if g["id"] == "like")["items"]
     assert [i["key"] for i in like] == ["E 316L", "core:050"]  # in the student's ranking
     assert all(i["included"] or i["reason"] for i in like)
+
+
+def test_explanations_use_the_wishlist_weight_when_there_is_a_wishlist(client):
+    client.put(
+        "/api/requirements",
+        json={"required_courses": ["C S 312"], "preferred_courses": ["E 316L", "GOV 310L"]},
+    )
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0, "credit_max": 12})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={"k": 5}).json()
+    assert r["weights"]["wishlist"] > 0.05
+    cmp = client.post(
+        "/api/schedules/compare", json={"code": "C S 312", "uniques": ["10001", "10002"]}
+    ).json()
+    assert cmp["weights"]["wishlist"] > 0.05
+    client.put("/api/requirements", json={"required_courses": ["C S 312"]})
+    assert (
+        client.post("/api/schedules/generate", json={"k": 5}).json()["weights"]["wishlist"] == 0
+    )  # no wishlist, no weight

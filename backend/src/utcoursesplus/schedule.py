@@ -224,6 +224,18 @@ def _best_per_course(secs: list[Sec], scorer: Scorer, cap: int) -> list[Sec]:
     return sorted(secs, key=lambda s: -val(s))[:cap]
 
 
+def wish_keys(req: Requirements) -> list[str]:
+    """The like-to-take entries that can take part: not already required, and not a Core area required outright."""
+    required_core = {f"core:{x}" for x in req.core_areas}
+    return [c for c in req.preferred_courses if c not in req.required_courses and c not in required_core]
+
+
+def wish_weights(req: Requirements) -> dict[str, float]:
+    """Rank weight for each like-to-take entry: the best-ranked gets the largest."""
+    keys = wish_keys(req)
+    return {c: float(len(keys) - i) for i, c in enumerate(keys)}
+
+
 def build_slots(
     cat: Catalog, req: Requirements, cfg: PreferenceConfig, scorer: Scorer
 ) -> tuple[list[Slot], list[str], list[str]]:
@@ -277,10 +289,8 @@ def build_slots(
         slots.append(Slot(CORE_NAMES.get(code, code), "core", _best_per_course(pool, scorer, CAND_PER_SLOT)))
 
     base = sum(min((s.credits for s in sl.candidates), default=3) for sl in slots)
-    prefs_ = [
-        c for c in req.preferred_courses if c not in taken and c not in [f"core:{x}" for x in req.core_areas]
-    ]
-    scorer.wish = {c: float(len(prefs_) - i) for i, c in enumerate(prefs_)}
+    prefs_ = wish_keys(req)
+    scorer.wish = wish_weights(req)
     for tok in prefs_:
         if tok.startswith("core:"):
             area = tok[5:]
@@ -622,7 +632,9 @@ def compare_sections(
 ) -> tuple[list[SectionComparison], dict[str, float]]:
     """Best whole schedule if the student gets exactly this unique for the course, for each unique given.
     Shows how choosing one section of a course reshapes everything else."""
-    weights = Scorer(cfg, sig, buildings or Buildings()).weights()
+    scorer = Scorer(cfg, sig, buildings or Buildings())
+    scorer.wish = wish_weights(req)
+    weights = scorer.weights()
     rows: list[SectionComparison] = []
     for u in uniques:
         r2 = req.model_copy(deep=True)

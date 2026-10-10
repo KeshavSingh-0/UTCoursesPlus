@@ -80,12 +80,12 @@ export function PreferencesScreen({ status, onChanged, last }: { status: Status;
     <div>
       <PageHead title="Preferences">These settings drive every ranking. Hard constraints remove options; weights decide the order among what remains.</PageHead>
       {err ? <Note error>{err}</Note> : null}
-      {msg ? <Note>{msg}</Note> : null}
+      {msg ? <div className="note ok" role="status">{msg}</div> : null}
 
       <section className="block" aria-labelledby="nl-h">
         <h2 id="nl-h">Describe what you want</h2>
         <p className="lede">Type it in plain English, for example: no classes before 10, keep Fridays free, I care more about workload than professor ratings. The language model only proposes new settings; you see exactly what would change and confirm before anything is saved. It never builds or ranks schedules.</p>
-        {!status.llm_configured ? <Note><p>ANTHROPIC_API_KEY is not set, so this box is disabled. Set it in the terminal that runs the server and restart. The sliders and fields below work without it.</p></Note> : null}
+        {!status.llm_configured ? <Note><p>No API key is set, so this box is disabled. Paste one on the <a href="#models">AI models</a> screen. The sliders and fields below work without it.</p></Note> : null}
         <label className="field" style={{ maxWidth: 760, marginTop: 8 }}>
           <span>Your request</span>
           <textarea rows={3} value={req} onChange={(e) => setReq(e.target.value)} disabled={!status.llm_configured} />

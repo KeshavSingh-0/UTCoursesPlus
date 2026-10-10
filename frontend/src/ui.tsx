@@ -71,3 +71,11 @@ export function when(iso: string): string {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+/** Stable colour index (0 to 7) for a course code, so a course keeps its colour on every screen. */
+export function courseColor(code: string): number {
+  let h = 0;
+  for (const ch of code) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 8;
+}
+export const ccClass = (code: string) => `cc${courseColor(code)}`;

@@ -1,5 +1,6 @@
 import type { Section } from "./api";
 import { fmtMin } from "./api";
+import { ccClass } from "./ui";
 
 const DAYS = ["M", "T", "W", "TH", "F", "S"];
 const NAMES: Record<string, string> = { M: "Mon", T: "Tue", W: "Wed", TH: "Thu", F: "Fri", S: "Sat" };
@@ -43,7 +44,7 @@ export function Calendar({ sections, compact = false, label }: { sections: Secti
               {meets
                 .filter(({ m }) => m.days.includes(d))
                 .map(({ s, m }, i) => (
-                  <div className="block" key={`${s.unique}-${i}`} style={{ top: (m.start - first) * px, height: (m.end - m.start) * px - 2 }}>
+                  <div className={`block ${ccClass(s.code)}`} key={`${s.unique}-${i}`} style={{ top: (m.start - first) * px, height: (m.end - m.start) * px - 2 }}>
                     <b>{s.code}</b>
                     {compact ? null : (
                       <>
@@ -58,6 +59,11 @@ export function Calendar({ sections, compact = false, label }: { sections: Secti
           ))}
         </div>
       </div>
+      {!compact && sections.length ? (
+        <p className="small" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: "4px 16px" }}>
+          {sections.map((s) => (<span key={s.unique} className={ccClass(s.code)}><i className="swatch" aria-hidden />{s.code}</span>))}
+        </p>
+      ) : null}
       {untimed.length ? (
         <p className="small muted" style={{ marginTop: 6 }}>
           No meeting time listed: {untimed.map((s) => `${s.code} (${s.unique})`).join(", ")}

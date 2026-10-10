@@ -52,23 +52,40 @@ The crawl resumes from `data/cache/`. Without automation: save result pages from
     cd backend
     uv run utcoursesplus serve
 
-Then open http://127.0.0.1:8000. The language-model features (plain-English preferences, audit parsing, syllabus
-extraction) need `ANTHROPIC_API_KEY` set in the same terminal before `serve`. Type `export ANTHROPIC_API_KEY=` and
-paste the key after it in your own terminal only; never put it in chat, a file in the repo, or a command you share.
-
-For front-end development: `cd frontend && npm run dev` (proxies /api to port 8000).
+Then open http://127.0.0.1:8000. The three language-model features (plain-English preferences, audit parsing, syllabus
+reading) need an Anthropic API key. Paste it on the AI models screen, where you can also choose which model runs each
+job; it is saved in `data/settings.json` on this computer and never shown again. Setting `ANTHROPIC_API_KEY` in the
+terminal before `serve` also works, and a key saved in the app takes precedence. Keep keys out of chat and out of the
+repository.
 
 Screens:
 
-- Requirements: tick Core areas, and keep two lists of courses. Required courses are in every schedule. Like to take
+- Requirements: triage the Core. Each Core area you still need is Required now, Like to take (included only if it fits,
+  ranked with your courses) or Not this semester. Then keep two lists of courses. Required courses are in every schedule. Like to take
   courses are optional and ranked: drag them (or use the move buttons) and the app keeps as many as fit, preferring the
   higher-ranked one when two clash. A pasted degree audit can be parsed for review.
 - Courses and sections: filterable table; each course can be added to either list.
 - Preferences: sliders (including how much Like to take matters), hard constraints, and the plain-English box with a diff and undo.
-- Ranked schedules: calendar, why each ranks where it does, backups.
+- Ranked schedules: calendar, why each ranks where it does, backups. If nothing fits, it names the required items that, if put
+  off, would let a schedule exist. The second tab compares the sections of one course.
+- Plan map: one picture of the whole plan (see below).
 - Registration plan: a keyboard runner plus a map of every fallback (see below).
 - Syllabi: choose a subset of courses, read UT's syllabus site for just those, and get a difficulty score (see below).
 - Data sources: what was loaded, when, and what is missing.
+- AI models: your API key and the model for each job.
+
+### Specific sections
+
+On Requirements, open Sections beside any course and tick the unique numbers you would accept; only those are used for
+that course. Type a unique number under Add a specific section to pin it directly. With two or more sections pinned,
+Compare (on that row, or the second tab of Ranked schedules) finds the best whole schedule for each one and explains
+what each choice changes.
+
+### Plan map
+
+Required courses, Core areas, like-to-take courses and electives as a tree: each course shows the section the plan wants and
+the fallbacks in order, a Core area also shows other courses that would cover it, left-out items say why, and the backup
+schedules sit alongside. Click a box to see its details or copy a unique number.
 
 ### Registration runner
 

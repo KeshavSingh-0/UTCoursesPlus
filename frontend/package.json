@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "contrast": "node scripts/contrast.mjs",
-    "test": "node --test --experimental-strip-types src/runner.test.ts"
+    "test": "node --test --experimental-strip-types src/runner.test.ts src/planlayout.test.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

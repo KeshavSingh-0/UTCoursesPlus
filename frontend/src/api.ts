@@ -41,7 +41,7 @@ export type Section = {
 };
 export type CoreArea = { code: string; name: string };
 export type Group = { name: string; kind: "core_area" | "required_course" | "choose_from" | "elective"; core_code: string | null; courses: string[]; pick: number; credit_hours_needed: number | null };
-export type Requirements = { core_areas: string[]; required_courses: string[]; preferred_courses: string[]; groups: Group[]; elective_depts: string[]; registration_time: string | null };
+export type Requirements = { core_areas: string[]; required_courses: string[]; preferred_courses: string[]; pinned_sections: Record<string, string[]>; groups: Group[]; elective_depts: string[]; registration_time: string | null };
 export type TimeBlock = { days: string[]; start_min: number; end_min: number };
 export type Hard = {
   earliest_start_min: number | null; latest_end_min: number | null; days_off: string[]; max_gap_min: number | null; max_walk_min: number | null;
@@ -68,7 +68,28 @@ export type RegStep = {
 export type GenResult = {
   problems: string[]; notes: string[]; truncated: boolean; searched: number; schedules: Schedule[]; backups: Schedule[];
   registration: { steps: RegStep[]; label: string; registration_time: string | null } | null; weights: Record<string, number>; change: string[];
+  deferrals: { kind: "course" | "core"; key: string; label: string; utility: number }[]; plan_tree: PlanTree | null;
 };
+export type PlanOption = RegOption & { planned: boolean };
+export type PlanAlt = { code: string; title: string; credits: number; sections: number; rank: number; ease_score: number | null; confidence: string;
+  best: { unique: string; when: string; status: string; reserved: boolean; instructors: string[] } };
+export type PlanItem = {
+  key: string; code: string | null; title: string | null; credits: number | null; included: boolean; slot: string; rank: number | null;
+  area?: string; options: PlanOption[]; alternatives: PlanAlt[]; reason: string | null;
+};
+export type PlanTree = {
+  root: { title: string; credits: number; courses: number; utility: number };
+  groups: { id: "required" | "core" | "like" | "elective"; title: string; items: PlanItem[] }[];
+  backups: { index: number; credits: number; utility: number; sections: { unique: string; code: string; title: string; when: string; status: string; shared: boolean }[] }[];
+};
+export type SettingsView = {
+  key_source: "saved" | "environment" | null; key_hint: string | null; default_model: string; models: Record<string, string>;
+  tasks: Record<string, string>; fallback_models: string[];
+};
+export type CompareRow = {
+  unique: string; section: Section | null; fits: boolean; utility: number | null; delta: number | null; why: string[]; problems: string[]; schedule: Schedule | null;
+};
+export type Compare = { code: string; in_plan_as: string; rows: CompareRow[]; best_utility: number | null };
 export type Suggestion = {
   area: string; total: number;
   courses: { code: string; title: string; credits: number; rank: number;

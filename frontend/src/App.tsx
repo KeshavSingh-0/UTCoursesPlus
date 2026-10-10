@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, ClipboardList, Database, FileText, ListChecks, SlidersHorizontal, Table2 } from "lucide-react";
+import { CalendarDays, ClipboardList, Database, FileText, KeyRound, ListChecks, Network, SlidersHorizontal, Table2 } from "lucide-react";
 import { api } from "./api";
 import type { GenResult, Status } from "./api";
 import { CoursesScreen } from "./Courses";
+import { ModelsScreen } from "./Models";
+import { PlanMapScreen } from "./PlanMap";
 import { PreferencesScreen } from "./Preferences";
 import { RegistrationScreen } from "./Registration";
 import { RequirementsScreen } from "./Requirements";
@@ -16,9 +18,11 @@ const SCREENS = [
   { id: "courses", label: "Courses and sections", icon: Table2 },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "schedules", label: "Ranked schedules", icon: CalendarDays },
+  { id: "planmap", label: "Plan map", icon: Network },
   { id: "registration", label: "Registration plan", icon: ClipboardList },
   { id: "syllabi", label: "Syllabi", icon: FileText },
   { id: "sources", label: "Data sources", icon: Database },
+  { id: "models", label: "AI models", icon: KeyRound },
 ] as const;
 type Id = (typeof SCREENS)[number]["id"];
 
@@ -30,8 +34,9 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [genErr, setGenErr] = useState("");
 
+  const refreshStatus = useCallback(() => { api<Status>("/api/status").then(setStatus).catch((e) => setFatal((e as Error).message)); }, []);
   useEffect(() => {
-    api<Status>("/api/status").then(setStatus).catch((e) => setFatal((e as Error).message));
+    refreshStatus();
     const on = () => { const id = SCREENS.find((s) => s.id === location.hash.slice(1))?.id; if (id) setScreen(id); };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
@@ -54,6 +59,7 @@ export function App() {
       <a className="skip" href="#content">Skip to content</a>
       <nav className="nav" aria-label="Main">
         <div className="brand">UT Courses Plus</div>
+        <div className="brand-sub">Spring 2027 planner</div>
         <ul>
           {SCREENS.map(({ id, label, icon: Icon }) => (
             <li key={id}>
@@ -70,9 +76,11 @@ export function App() {
         {screen === "courses" && <CoursesScreen status={status} />}
         {screen === "preferences" && <PreferencesScreen status={status} onChanged={generate} last={result} />}
         {screen === "schedules" && <SchedulesScreen status={status} result={result} busy={busy} error={genErr} onGenerate={generate} />}
+        {screen === "planmap" && <PlanMapScreen status={status} />}
         {screen === "registration" && <RegistrationScreen status={status} result={result} />}
         {screen === "syllabi" && <SyllabiScreen />}
         {screen === "sources" && <SourcesScreen />}
+        {screen === "models" && <ModelsScreen status={status} onChanged={refreshStatus} />}
       </main>
     </div>
   );

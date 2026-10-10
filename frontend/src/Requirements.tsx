@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Trash2 } from "lucide-react";
 import { api, ApiError, f2 } from "./api";
-import type { CoreArea, Group, Requirements as Req, Status, Suggestion } from "./api";
+import type { CoreArea, Group, Requirements as Req, Section, Status, Suggestion } from "./api";
 import { Confidence, Interval, NoData, Note, PageHead, StatusText } from "./ui";
 
 type Tree = { code: string; name: string; n_courses: number }[];
+type CoreMode = "required" | "like" | "defer";
 
 export function RequirementsScreen({ status }: { status: Status }) {
   const [areas, setAreas] = useState<CoreArea[]>([]);
@@ -30,47 +31,71 @@ export function RequirementsScreen({ status }: { status: Status }) {
 
   const save = async (next: Req) => {
     setErr("");
+    setReq(next); // show the change at once; the server's cleaned-up copy replaces it below
     try {
       const r = await api<{ requirements: Req; not_in_schedule: string[] }>("/api/requirements", { method: "PUT", body: next });
       setReq(r.requirements);
-      setWarn(r.not_in_schedule.map((c) => `${c} is not in the Spring 2027 schedule and was not added.`));
+      setWarn(r.not_in_schedule.map((c) => (c.includes(" is not ") || c.startsWith("core:") ? `${c} was not added.` : `${c} is not in the Spring 2027 schedule and was not added.`)));
     } catch (e) {
       setErr((e as Error).message);
+      void load(); // put the screen back in line with what is actually saved
     }
   };
 
   if (!req) return <div><PageHead title="Requirements" />{err ? <Note error>{err}</Note> : <p className="muted">Loading.</p>}</div>;
 
-  const toggleArea = (code: string) =>
-    save({ ...req, core_areas: req.core_areas.includes(code) ? req.core_areas.filter((c) => c !== code) : [...req.core_areas, code] });
+  const areaName = (code: string) => areas.find((a) => a.code === code)?.name ?? code;
+  const coreMode = (code: string): CoreMode => (req.core_areas.includes(code) ? "required" : req.preferred_courses.includes(`core:${code}`) ? "like" : "defer");
+  const setCore = (code: string, mode: CoreMode) => {
+    const tok = `core:${code}`;
+    const core_areas = req.core_areas.filter((c) => c !== code);
+    let preferred = req.preferred_courses.filter((c) => c !== tok);
+    if (mode === "required") core_areas.push(code);
+    if (mode === "like") preferred = [...preferred, tok];
+    void save({ ...req, core_areas, preferred_courses: preferred });
+  };
+  const label = (item: string) => (item.startsWith("core:") ? `Core: ${areaName(item.slice(5))}` : item);
+  const shownAreas = [...req.core_areas, ...req.preferred_courses.filter((c) => c.startsWith("core:")).map((c) => c.slice(5))];
+  const setPins = (code: string, uniques: string[]) => {
+    const pins = { ...req.pinned_sections };
+    if (uniques.length) pins[code] = uniques; else delete pins[code];
+    void save({ ...req, pinned_sections: pins });
+  };
+
   return (
     <div>
-      <PageHead title="Requirements">Choose what you still need. Schedules are built from these, and nothing here leaves your computer except the pasted audit lines you choose to parse.</PageHead>
+      <PageHead title="Requirements">Choose what you still need. Not everything you have to take has to happen this semester, so you can triage: require what must happen now, rank what you would like, and put the rest off. Fewer required items make the search easier.</PageHead>
       {err ? <Note error>{err}</Note> : null}
       {!status.has_data ? <NoData /> : null}
 
       <section className="block" aria-labelledby="core-h">
-        <h2 id="core-h">Core curriculum areas you still need</h2>
-        <p className="lede">Tick each area you need one more course for. The course options for every ticked area appear below, with the easiest first.</p>
-        <div className="grid2">
-          {areas.map((a) => (
-            <label className="check" key={a.code}>
-              <input type="checkbox" checked={req.core_areas.includes(a.code)} onChange={() => toggleArea(a.code)} />
-              <span>
-                {a.name} <span className="muted small">({counts[a.code] ?? 0} {(counts[a.code] ?? 0) === 1 ? "course" : "courses"} offered)</span>
-              </span>
-            </label>
-          ))}
-        </div>
+        <h2 id="core-h">Core curriculum areas</h2>
+        <p className="lede">For each area you still need, choose how it counts this semester. Required: every schedule must include a course for it. Like to take: included only if it fits, in the order you rank it below. Not this semester: left out of the search entirely.</p>
+        {areas.map((a) => (
+          <div className="triage" key={a.code}>
+            <span>{a.name} <span className="muted small">({counts[a.code] ?? 0} {(counts[a.code] ?? 0) === 1 ? "course" : "courses"} offered)</span></span>
+            <div className="seg" role="radiogroup" aria-label={`${a.name} this semester`}>
+              {(["required", "like", "defer"] as CoreMode[]).map((m) => (
+                <label key={m} className={m}>
+                  <input type="radio" name={`core-${a.code}`} checked={coreMode(a.code) === m} onChange={() => setCore(a.code, m)} />
+                  {m === "required" ? "Required now" : m === "like" ? "Like to take" : "Not this semester"}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="block" aria-labelledby="req-h">
         <h2 id="req-h">Your courses</h2>
-        <p className="lede">Required courses must be in every schedule. Like to take courses are optional: the app includes as many as fit, and when two clash it keeps the one you ranked higher. Drag a like-to-take course to rank it, or use its move buttons. The weight for this is set on the Preferences screen.</p>
+        <p className="lede">Required courses must be in every schedule. Like to take is optional and ranked: the app includes as many as fit, and when two clash it keeps the one you ranked higher. Core areas you chose above as Like to take rank here too. Drag to rank, or use the move buttons. Open Sections on a course to accept only certain unique numbers.</p>
         <div className="grid2" style={{ alignItems: "start" }}>
           <CourseList
             title="Required"
             items={req.required_courses}
+            labelOf={label}
+            pins={req.pinned_sections}
+            onPins={setPins}
             onChange={(items) => save({ ...req, required_courses: items, preferred_courses: req.preferred_courses.filter((c) => !items.includes(c)) })}
             moveLabel="Like to take instead"
             onMove={(c) => save({ ...req, required_courses: req.required_courses.filter((x) => x !== c), preferred_courses: [...req.preferred_courses, c] })}
@@ -79,12 +104,16 @@ export function RequirementsScreen({ status }: { status: Status }) {
             title="Like to take"
             ranked
             items={req.preferred_courses}
+            labelOf={label}
+            pins={req.pinned_sections}
+            onPins={setPins}
             onChange={(items) => save({ ...req, preferred_courses: items, required_courses: req.required_courses.filter((c) => !items.includes(c)) })}
             moveLabel="Make required"
-            onMove={(c) => save({ ...req, preferred_courses: req.preferred_courses.filter((x) => x !== c), required_courses: [...req.required_courses, c] })}
+            onMove={(c) => c.startsWith("core:") ? setCore(c.slice(5), "required") : save({ ...req, preferred_courses: req.preferred_courses.filter((x) => x !== c), required_courses: [...req.required_courses, c] })}
           />
         </div>
         {warn.map((w) => <p key={w} className="small warn" style={{ marginTop: 6 }}>{w}</p>)}
+        <AddUnique onAdded={(r) => setReq(r)} />
         {req.groups.length ? (
           <div style={{ marginTop: 16 }}>
             <h3>Pick-from groups</h3>
@@ -100,12 +129,12 @@ export function RequirementsScreen({ status }: { status: Status }) {
         ) : null}
       </section>
 
-      {req.core_areas.length ? (
+      {shownAreas.length ? (
         <section className="block" aria-labelledby="opts-h">
           <h2 id="opts-h">Course options</h2>
-          <p className="lede">Courses carrying each Core tag in the registrar schedule. Ease combines grades, professor difficulty and syllabus lightness where they exist; the range shows how sure that estimate is.</p>
-          {req.core_areas.map((code) => (
-            <AreaOptions key={code} code={code} name={areas.find((a) => a.code === code)?.name ?? code} />
+          <p className="lede">Courses carrying each Core tag in the registrar schedule, for the areas you required or would like. Ease combines grades, professor difficulty and syllabus lightness where they exist; the range shows how sure that estimate is.</p>
+          {shownAreas.map((code) => (
+            <AreaOptions key={code} code={code} name={areaName(code)} />
           ))}
         </section>
       ) : null}
@@ -291,12 +320,15 @@ function AuditPaste({ onApplied }: { onApplied: (r: Req) => void }) {
   );
 }
 
-function CourseList({ title, items, onChange, onMove, moveLabel, ranked }: {
+
+function CourseList({ title, items, onChange, onMove, moveLabel, ranked, labelOf, pins, onPins }: {
   title: string; items: string[]; onChange: (items: string[]) => void; onMove: (code: string) => void; moveLabel: string; ranked?: boolean;
+  labelOf: (item: string) => string; pins: Record<string, string[]>; onPins: (code: string, uniques: string[]) => void;
 }) {
   const [text, setText] = useState("");
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const add = () => {
     const parts = text.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
     if (parts.length) onChange([...items, ...parts]);
@@ -308,6 +340,10 @@ function CourseList({ title, items, onChange, onMove, moveLabel, ranked }: {
     const [m] = next.splice(from, 1);
     next.splice(to, 0, m);
     onChange(next);
+  };
+  const compare = (code: string) => {
+    try { sessionStorage.setItem("utcp.compareCode", code); } catch { /* ignore */ }
+    location.hash = "schedules";
   };
   const id = title.toLowerCase().replace(/\W+/g, "-");
   return (
@@ -321,28 +357,103 @@ function CourseList({ title, items, onChange, onMove, moveLabel, ranked }: {
         <button className="btn" style={{ alignSelf: "end" }} onClick={add}>Add</button>
       </div>
       {items.length === 0 ? <p className="small muted">None yet.</p> : (
-        <ol className="list-plain" aria-labelledby={`${id}-h`} style={{ counterReset: "r" }}>
-          {items.map((c, i) => (
-            <li key={c} draggable={!!ranked}
-              onDragStart={() => setDrag(i)} onDragEnd={() => { setDrag(null); setOver(null); }}
-              onDragOver={(e) => { if (ranked && drag !== null) { e.preventDefault(); setOver(i); } }}
-              onDrop={() => { if (drag !== null) reorder(drag, i); setDrag(null); setOver(null); }}
-              style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--line)", padding: "6px 0",
-                background: over === i && drag !== i ? "var(--primary-tint)" : undefined, opacity: drag === i ? 0.5 : 1, cursor: ranked ? "grab" : undefined }}>
-              {ranked ? <><GripVertical size={16} aria-hidden style={{ color: "var(--muted)" }} /><span className="mono small" style={{ width: 22 }}>{i + 1}.</span></> : null}
-              <span style={{ flex: 1 }}>{c}</span>
-              {ranked ? (
-                <>
-                  <button className="btn text" aria-label={`Move ${c} up`} disabled={i === 0} onClick={() => reorder(i, i - 1)}><ArrowUp size={14} aria-hidden /></button>
-                  <button className="btn text" aria-label={`Move ${c} down`} disabled={i === items.length - 1} onClick={() => reorder(i, i + 1)}><ArrowDown size={14} aria-hidden /></button>
-                </>
-              ) : null}
-              <button className="btn text small" onClick={() => onMove(c)}>{moveLabel}</button>
-              <button className="btn text" onClick={() => onChange(items.filter((x) => x !== c))} aria-label={`Remove ${c}`}><Trash2 size={14} aria-hidden /></button>
-            </li>
-          ))}
+        <ol className="list-plain" aria-labelledby={`${id}-h`}>
+          {items.map((c, i) => {
+            const isCore = c.startsWith("core:");
+            const pinned = pins[c] ?? [];
+            return (
+              <li key={c} draggable={!!ranked}
+                onDragStart={() => setDrag(i)} onDragEnd={() => { setDrag(null); setOver(null); }}
+                onDragOver={(e) => { if (ranked && drag !== null) { e.preventDefault(); setOver(i); } }}
+                onDrop={() => { if (drag !== null) reorder(drag, i); setDrag(null); setOver(null); }}
+                style={{ borderBottom: "1px solid var(--line)", padding: "6px 0", background: over === i && drag !== i ? "var(--orange-100)" : undefined, opacity: drag === i ? 0.5 : 1, cursor: ranked ? "grab" : undefined }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {ranked ? <><GripVertical size={16} aria-hidden style={{ color: "var(--muted)" }} /><span className="mono small" style={{ width: 22, color: "var(--orange-700)", fontWeight: 600 }}>{i + 1}.</span></> : null}
+                  <span style={{ flex: 1, fontWeight: 500 }}>{labelOf(c)}</span>
+                  {!isCore ? (
+                    <button className="btn text small" aria-expanded={open === c} onClick={() => setOpen(open === c ? null : c)}>
+                      {pinned.length ? `${pinned.length} section${pinned.length === 1 ? "" : "s"} pinned` : "Any section"}
+                    </button>
+                  ) : null}
+                  {pinned.length > 1 ? <button className="btn text small" onClick={() => compare(c)}>Compare</button> : null}
+                  {ranked ? (
+                    <>
+                      <button className="btn text" aria-label={`Move ${labelOf(c)} up`} disabled={i === 0} onClick={() => reorder(i, i - 1)}><ArrowUp size={14} aria-hidden /></button>
+                      <button className="btn text" aria-label={`Move ${labelOf(c)} down`} disabled={i === items.length - 1} onClick={() => reorder(i, i + 1)}><ArrowDown size={14} aria-hidden /></button>
+                    </>
+                  ) : null}
+                  <button className="btn text small" onClick={() => onMove(c)}>{moveLabel}</button>
+                  <button className="btn text" onClick={() => onChange(items.filter((x) => x !== c))} aria-label={`Remove ${labelOf(c)}`}><Trash2 size={14} aria-hidden /></button>
+                </div>
+                {open === c && !isCore ? <SectionPicker code={c} pinned={pinned} onChange={(u) => onPins(c, u)} onCompare={() => compare(c)} /> : null}
+              </li>
+            );
+          })}
         </ol>
       )}
+    </div>
+  );
+}
+
+/** Tick the unique numbers you would accept for a course. Nothing ticked means any section. */
+function SectionPicker({ code, pinned, onChange, onCompare }: { code: string; pinned: string[]; onChange: (u: string[]) => void; onCompare: () => void }) {
+  const [rows, setRows] = useState<Section[] | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    api<{ sections: Section[] }>(`/api/courses/sections?code=${encodeURIComponent(code)}`).then((r) => setRows(r.sections)).catch((e) => setErr((e as Error).message));
+  }, [code]);
+  const set = useMemo(() => new Set(pinned), [pinned]);
+  if (err) return <Note error>{err}</Note>;
+  if (!rows) return <p className="small muted">Loading sections.</p>;
+  const toggle = (u: string) => onChange(set.has(u) ? pinned.filter((x) => x !== u) : [...pinned, u]);
+  return (
+    <div style={{ margin: "8px 0 4px 30px" }}>
+      <p className="small muted" style={{ marginBottom: 6 }}>Tick the sections you would take. The search will use only those. Nothing ticked means any section.</p>
+      <table className="t">
+        <thead><tr><th>Pin</th><th>Unique</th><th>Meets</th><th>Instructor</th><th>Status</th><th className="num">Ease</th></tr></thead>
+        <tbody>
+          {rows.map((s) => (
+            <tr key={s.unique}>
+              <td><input type="checkbox" aria-label={`Accept unique ${s.unique}`} disabled={s.status === "cancelled"} checked={set.has(s.unique)} onChange={() => toggle(s.unique)} /></td>
+              <td className="mono">{s.unique}</td><td>{s.when}</td><td>{s.instructors.join("; ") || "Not listed"}</td>
+              <td><StatusText status={s.status} reserved={s.reserved} /></td>
+              <td className="num">{s.signal?.ease_score != null ? s.signal.ease_score.toFixed(2) : <span className="muted">none</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row" style={{ marginTop: 6 }}>
+        <button className="btn text small" onClick={() => onChange([])} disabled={!pinned.length}>Accept any section</button>
+        <button className="btn text small" onClick={onCompare} disabled={pinned.length < 2}>Compare the pinned sections</button>
+      </div>
+    </div>
+  );
+}
+
+function AddUnique({ onAdded }: { onAdded: (r: Req) => void }) {
+  const [u, setU] = useState("");
+  const [target, setTarget] = useState("required");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const go = async () => {
+    setErr(""); setMsg("");
+    try {
+      const r = await api<{ requirements: Req; added: string }>("/api/requirements/add-unique", { body: { unique: u.trim(), target } });
+      onAdded(r.requirements); setMsg(`Pinned ${r.added}.`); setU("");
+    } catch (e) { setErr((e as Error).message); }
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h3>Add a specific section</h3>
+      <p className="small muted" style={{ maxWidth: "75ch" }}>Type a unique number you already have in mind. Its course goes on the list you choose (if it is not on one), and only that unique is accepted for the course. Add more uniques of the same course to let the search choose between them.</p>
+      <div className="row" style={{ marginTop: 6 }}>
+        <label className="field"><span className="xs">Unique number</span><input type="text" inputMode="numeric" maxLength={5} value={u} onChange={(e) => setU(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && u.length === 5 && go()} style={{ width: 110 }} /></label>
+        <label className="field"><span className="xs">Put the course on</span>
+          <select value={target} onChange={(e) => setTarget(e.target.value)}><option value="required">Required</option><option value="like">Like to take</option></select></label>
+        <button className="btn" style={{ alignSelf: "end" }} disabled={u.length !== 5} onClick={go}>Add section</button>
+      </div>
+      {msg ? <p className="small good" style={{ marginTop: 4 }}>{msg}</p> : null}
+      {err ? <p className="small warn" style={{ marginTop: 4 }}>{err}</p> : null}
     </div>
   );
 }

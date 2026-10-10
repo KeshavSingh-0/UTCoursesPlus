@@ -559,6 +559,73 @@
       ],
       "id": 11,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: colour system, plan map, core triage and section pinning UI, section comparison, AI models screen",
+      "summary": "Interface for five requests: a colour system; Core triage and a ranked list that mixes courses and Core areas; pinning specific unique numbers and comparing them; a plan map; and an AI models screen for the API key and per-job model.",
+      "files": [
+        "frontend/src/{styles.css,Requirements,Schedules,PlanMap,Models,Deferrals,App,Calendar,ui,api}.tsx/.ts",
+        "frontend/src/{planlayout.ts,planlayout.test.ts}",
+        "frontend/scripts/contrast.mjs",
+        "backend/src/utcoursesplus/{schedule,api}.py",
+        "backend/tests/test_api.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Colour system",
+          "how": "Navy sidebar, headings and table headers; burnt orange for primary buttons, the current screen and focus; teal, amber and red for Open, Waitlisted and Closed text; eight course hues so a course keeps its colour on every calendar; group colours (navy required, teal Core, orange like to take, purple electives, slate backups). Still no gradients, glow, pill shapes or badges, and shadows are used only as focus rings. 36 colour pairs are checked against WCAG AA by npm run contrast and all pass. This relaxes the earlier one-colour-plus-accent rule at the user's request."
+        },
+        {
+          "what": "Core triage UI",
+          "how": "Each Core area has a three-way control: Required now, Like to take, Not this semester. Like to take areas join the same ranked list as courses (shown as 'Core: Humanities'), and the schedule screen lists items to defer when nothing fits, with buttons that move them."
+        },
+        {
+          "what": "Pinning and comparison UI",
+          "how": "Each course row opens a Sections table with a checkbox per unique; an Add a specific section box pins a unique directly. Ranked schedules has a second tab that compares chosen sections of one course: per section, whether a schedule exists, its score, the difference from the best, the reasons, and a calendar of the best schedule."
+        },
+        {
+          "what": "Plan map",
+          "how": "planlayout.ts lays the tree out in columns with parents centred on their children and curved connectors (tested with node:test, five tests); PlanMap.tsx renders each node as a button over an SVG of connectors, highlights the path to the selected node, and shows a details panel with a copy button for unique numbers. Filters control how many fallbacks, other Core courses and backups are shown."
+        },
+        {
+          "what": "AI models screen",
+          "how": "Password-style key box with show and hide, Save, Test (lists the models the key can use) and Remove; default model and one model per job. The key is never displayed after saving."
+        },
+        {
+          "what": "Requirements responsiveness",
+          "how": "Changes show immediately and are reconciled with the server's copy afterwards, so checkboxes no longer snap back while a save is in flight."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Explanations said a preferred-courses difference was worth points 'at your weight of 0%'",
+          "cause": "The weights shown beside explanations were computed by a scorer that did not know about the like-to-take list, which sets that weight to 0 when the list is empty",
+          "fix": "Ranked schedules and comparisons now build the scorer with the same like-to-take weights as the search (wish_weights); a test checks the weight is positive with a list and 0 without"
+        },
+        {
+          "symptom": "Checkbox in the Sections table flickered back after a click",
+          "cause": "State only updated after the save request returned",
+          "fix": "Optimistic update in Requirements.save"
+        },
+        {
+          "symptom": "Syllabi and Data sources screens scrolled sideways on a phone",
+          "cause": "Wide tables with no scroll container",
+          "fix": "On narrow screens tables scroll within themselves"
+        },
+        {
+          "symptom": "The plan map opened scrolled to the top while its root sat in the vertical middle",
+          "cause": "Parents are centred on their children",
+          "fix": "Scroll the map so the root is in view when it is built"
+        }
+      ],
+      "notes": [
+        "Checked in headless Chromium against the synthetic demo database: triage radios, pin toggles, add by unique, plan map selection, comparison, key save with masking, the defer-to-fix flow, and every screen at 1440 and 390 px with no console errors, failed requests or sideways scrolling.",
+        "Not exercised: a real API key against Anthropic (the test endpoint is covered with a stand-in client) and anything that needs your UT login.",
+        "Pinned sections apply to course codes. A Core area can still be filled by any course tagged with it."
+      ],
+      "id": 12,
+      "date": "2026-10-08"
     }
   ]
 }
