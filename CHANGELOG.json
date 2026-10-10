@@ -507,6 +507,58 @@
       ],
       "id": 10,
       "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: core triage, pinned sections and section comparison, in-app API key and model choice, plan map data",
+      "summary": "Backend for four requests: Core areas can be required now, like-to-take, or deferred, and when nothing fits the search names what to defer; specific unique numbers can be pinned for a course and compared against each other; the API key and per-job model are set inside the app; and a structured plan map (what to take, fallbacks, left-out items, backups) is served for a richer tree.",
+      "files": [
+        "backend/src/utcoursesplus/{requirements,schedule,plantree,settings,llm,nlpref,syllabus,api}.py",
+        "backend/tests/{conftest,test_schedule,test_api}.py"
+      ],
+      "changes": [
+        {
+          "what": "Core triage",
+          "how": "A Core area is required now (Requirements.core_areas), like-to-take (a 'core:CODE' token in the same ranked list as courses, so courses and Core areas rank against each other), or deferred (in neither). Like-to-take Core areas become optional slots tagged with a wish key; the wishlist feature rewards the rank-weighted share of keys included."
+        },
+        {
+          "what": "Deferral suggestions",
+          "how": "When no schedule exists (including when the requirements alone exceed the credit maximum), schedule.suggest_deferrals removes each required course or Core area in turn, searches again with a smaller node budget, and returns the ones that make a schedule possible, best first. The API returns them as deferrals."
+        },
+        {
+          "what": "Pinned sections",
+          "how": "Requirements.pinned_sections maps a course code to the unique numbers the student will accept. build_slots filters candidates to those uniques for required, like-to-take, core and pick-from slots; if none survive the constraints the problem names the pinned uniques. The API validates that each unique belongs to the course. POST /api/requirements/add-unique pins a unique and adds its course to the chosen list."
+        },
+        {
+          "what": "Section comparison",
+          "how": "schedule.compare_sections runs the full search once per unique with that single section pinned (the course is added as required if it is on neither list) and returns the best schedule, utility, difference from the best, and a plain-language explanation for each; whether the course was included matters for like-to-take courses."
+        },
+        {
+          "what": "Plan map data",
+          "how": "plantree.plan_tree turns the top schedule into groups (required, Core, like to take, electives) with each course's planned section and ordered fallbacks, other Core courses that could replace a Core pick (best by ease), left-out items with a reason (overlap, credit maximum, constraints, or simply scored lower), and the backup schedules marking shared sections. Each section placed in the top schedule now records which slot it fills."
+        },
+        {
+          "what": "API key and models in the app",
+          "how": "settings.py stores the Anthropic key and the model for each job (preferences, audit, syllabus) in data/settings.json with mode 600; the key is never returned, only a hint such as sk-ant-...abcd. A saved key takes precedence over ANTHROPIC_API_KEY. POST /api/settings/test lists the models the key can use through the SDK's models list call and flags chosen models that are not available. llm.structured takes the model from the job name."
+        },
+        {
+          "what": "Test isolation",
+          "how": "conftest.py points the settings file at a temp folder and removes the API key from the environment for every test, so a real key can never be read by a test."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "When the requirements alone exceeded the credit maximum the app said so but offered no way out",
+          "cause": "The early return skipped the deferral search",
+          "fix": "The early return also calls suggest_deferrals; covered by a test that names the three items"
+        }
+      ],
+      "notes": [
+        "Only Anthropic models are supported. The key box and model list are built for the Anthropic API; other providers would need a second client and are not included.",
+        "The key is stored unencrypted in a file only you can read, in the gitignored data folder. Anyone with access to your user account on this computer can read it.",
+        "The model list call needs no tokens, so testing a key costs nothing."
+      ],
+      "id": 11,
+      "date": "2026-10-08"
     }
   ]
 }

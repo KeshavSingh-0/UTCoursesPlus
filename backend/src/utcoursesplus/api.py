@@ -1,7 +1,6 @@
 """Local web API. Everything is read from and written to the SQLite file; nothing leaves the
 machine except language-model calls for audit parsing, syllabus extraction and preference tuning."""
 
-import os
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -16,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from . import coursedocs, llm, nlpref, prefs, requirements, schedule, signals, syllabus
+from . import coursedocs, llm, nlpref, plantree, prefs, requirements, schedule, settings, signals, syllabus
 from .buildings import Buildings
 from .catalog import CORE_NAMES, Catalog, core_tree, when_text
 from .config import DATA_DIR, TERM
@@ -47,6 +46,7 @@ class State:
         self._cat: Catalog | None = None
         self._sig: signals.SignalIndex | None = None
         self.last_top: schedule.Schedule | None = None
+        self.last: dict | None = None  # most recent generation, reused by the plan map
         self.jobs: dict[str, Job] = {}
         # replaceable in tests
         self.fetcher_factory = lambda: Fetcher(cookies=load_cookies())
@@ -136,6 +136,27 @@ class SyllabusIn(BaseModel):
     term: str | None = None
 
 
+class SettingsIn(BaseModel):
+    anthropic_key: str | None = None
+    clear_key: bool = False
+    default_model: str | None = None
+    models: dict[str, str] | None = None
+
+
+class TestKeyIn(BaseModel):
+    anthropic_key: str | None = None
+
+
+class AddUniqueIn(BaseModel):
+    unique: str
+    target: str = "required"  # required | like
+
+
+class CompareIn(BaseModel):
+    code: str
+    uniques: list[str] | None = None
+
+
 class FindIn(BaseModel):
     courses: list[str]
 
@@ -193,8 +214,8 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
                 "courses": q["courses"],
                 "departments": q["departments"],
                 "has_data": cfg_has_data,
-                "llm_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
-                "model": llm.MODEL,
+                "llm_configured": settings.key_source() is not None,
+                "model": settings.default_model(),
                 "buildings_loaded": st.buildings.available,
             }
 
@@ -303,8 +324,31 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
                 return out
 
             req.required_courses = clean(req.required_courses)
+            valid_core = {a.code for a in CORE_AREAS}
+            ranked: list[str] = []
+            for tok in req.preferred_courses:
+                if tok.startswith("core:"):
+                    code = tok[5:]
+                    if code not in valid_core:
+                        unknown.append(tok)
+                    elif code not in req.core_areas and tok not in ranked:
+                        ranked.append(tok)
+                else:
+                    ranked += [c for c in clean([tok]) if c not in ranked and c not in req.required_courses]
             # a course is either required or "like to take", never both; the ranking is the list order
-            req.preferred_courses = [c for c in clean(req.preferred_courses) if c not in req.required_courses]
+            req.preferred_courses = ranked
+            pins: dict[str, list[str]] = {}
+            for code, uniques in req.pinned_sections.items():
+                rc = requirements.resolve_code(code, st.cat)
+                good = [
+                    u
+                    for u in dict.fromkeys(uniques)
+                    if u in st.cat.sections and st.cat.sections[u].code == rc
+                ]
+                unknown += [f"{u} is not a section of {code}" for u in uniques if u not in good]
+                if rc and good:
+                    pins[rc] = good
+            req.pinned_sections = pins
             requirements.save(st.con, req)
             return {"requirements": req.model_dump(), "not_in_schedule": unknown}
 
@@ -450,41 +494,180 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             return {"config": cfg.model_dump(), "history": prefs.history(st.con)}
 
     # ------------------------------------------------------------------ schedules
+    def run_generate(k: int) -> dict[str, Any]:
+        cfg = prefs.current(st.con)
+        req = requirements.load(st.con)
+        cfg.hard.required_courses = req.required_courses
+        res = schedule.generate(st.cat, req, cfg, st.sig, st.buildings, k=max(1, min(k, 25)))
+        scorer = schedule.Scorer(cfg, st.sig, st.buildings)
+        w = scorer.weights()
+        out: dict[str, Any] = {
+            "problems": res.problems,
+            "notes": res.notes,
+            "truncated": res.truncated,
+            "searched": res.nodes,
+            "schedules": [],
+            "backups": [],
+            "registration": None,
+            "weights": w,
+            "change": [],
+            "deferrals": res.deferrals,
+            "plan_tree": None,
+        }
+        st.last = None
+        if res.schedules:
+            top = res.schedules[0]
+            for i, sch in enumerate(res.schedules):
+                d = schedule.schedule_json(sch, scorer)
+                nxt = res.schedules[i + 1] if i + 1 < len(res.schedules) else None
+                d["why"] = schedule.explain_vs(sch, nxt, w)
+                d["why_against"] = f"{nxt.credits} credits, utility {nxt.utility:.3f}" if nxt else None
+                out["schedules"].append(d)
+            backs = schedule.backups(res.pool, top, 3)
+            out["backups"] = [schedule.schedule_json(b, scorer) for b in backs]
+            out["registration"] = schedule.registration_plan(st.cat, top, req, cfg)
+            out["plan_tree"] = plantree.plan_tree(st.cat, req, cfg, scorer, top, backs, out["registration"])
+            out["change"] = schedule.describe_change(st.last_top, top) if st.last_top else []
+            st.last_top = top
+        return out
+
     @app.post("/api/schedules/generate")
     def generate(body: GenerateIn):
         with st.lock:
+            return run_generate(body.k)
+
+    @app.get("/api/courses/sections")
+    def course_sections(code: str):
+        with st.lock:
+            rc = requirements.resolve_code(code, st.cat) or code.strip().upper()
+            secs = sorted(st.cat.by_code.get(rc, []), key=lambda s: (s.status == "cancelled", s.unique))
+            sc = schedule.Scorer(prefs.current(st.con), st.sig, st.buildings)
+            return {
+                "code": rc,
+                "pinned": requirements.load(st.con).pinned_sections.get(rc, []),
+                "sections": [schedule.section_json(s, sc) for s in secs],
+            }
+
+    @app.post("/api/requirements/add-unique")
+    def add_unique(body: AddUniqueIn):
+        u = body.unique.strip()
+        with st.lock:
+            sec = st.cat.sections.get(u)
+            if not sec:
+                fail(404, f"{u} is not a unique number in the Spring 2027 schedule you loaded.")
+            if sec.status == "cancelled":
+                fail(422, f"{u} ({sec.code}) is cancelled.")
+            req = requirements.load(st.con)
+            if sec.code not in req.required_courses and sec.code not in req.preferred_courses:
+                (req.required_courses if body.target == "required" else req.preferred_courses).append(
+                    sec.code
+                )
+            pins = req.pinned_sections.setdefault(sec.code, [])
+            if u not in pins:
+                pins.append(u)
+            requirements.save(st.con, req)
+            return {"requirements": req.model_dump(), "added": f"{sec.code} {sec.title}, unique {u}"}
+
+    @app.post("/api/schedules/compare")
+    def compare(body: CompareIn):
+        with st.lock:
             cfg = prefs.current(st.con)
             req = requirements.load(st.con)
-            cfg.hard.required_courses = req.required_courses
-            res = schedule.generate(st.cat, req, cfg, st.sig, st.buildings, k=max(1, min(body.k, 25)))
+            code = requirements.resolve_code(body.code, st.cat)
+            if not code:
+                fail(422, f"{body.code} is not in the Spring 2027 schedule.")
+            avail = [s.unique for s in st.cat.by_code[code] if s.status != "cancelled"]
+            uniques = [u for u in (body.uniques or req.pinned_sections.get(code) or avail) if u in avail][:12]
+            if len(uniques) < 2:
+                fail(422, "Choose at least two sections of the course to compare.")
+            rows, weights = schedule.compare_sections(st.cat, req, cfg, st.sig, st.buildings, code, uniques)
             scorer = schedule.Scorer(cfg, st.sig, st.buildings)
-            w = scorer.weights()
-            out: dict[str, Any] = {
-                "problems": res.problems,
-                "notes": res.notes,
-                "truncated": res.truncated,
-                "searched": res.nodes,
-                "schedules": [],
-                "backups": [],
-                "registration": None,
-                "weights": w,
-                "change": [],
+            best_u = next((r.utility for r in rows if r.schedule and r.included), None)
+            return {
+                "code": code,
+                "in_plan_as": "required"
+                if code in req.required_courses
+                else "like to take"
+                if code in req.preferred_courses
+                else "added for this comparison",
+                "rows": [
+                    {
+                        "unique": r.unique,
+                        "section": schedule.section_json(r.section, scorer) if r.section else None,
+                        "fits": bool(r.schedule and r.included),
+                        "utility": None if r.utility is None else round(r.utility, 4),
+                        "delta": None if r.delta is None else round(r.delta, 4),
+                        "why": r.why,
+                        "problems": r.problems
+                        if not r.schedule
+                        else (
+                            []
+                            if r.included
+                            else [f"{code} was left out of the best schedule with this section."]
+                        ),
+                        "schedule": schedule.schedule_json(r.schedule, scorer) if r.schedule else None,
+                    }
+                    for r in rows
+                ],
+                "best_utility": best_u,
+                "weights": weights,
             }
-            if res.schedules:
-                top = res.schedules[0]
-                for i, sch in enumerate(res.schedules):
-                    d = schedule.schedule_json(sch, scorer)
-                    nxt = res.schedules[i + 1] if i + 1 < len(res.schedules) else None
-                    d["why"] = schedule.explain_vs(sch, nxt, w)
-                    d["why_against"] = f"{nxt.credits} credits, utility {nxt.utility:.3f}" if nxt else None
-                    out["schedules"].append(d)
-                out["backups"] = [
-                    schedule.schedule_json(b, scorer) for b in schedule.backups(res.pool, top, 3)
-                ]
-                out["registration"] = schedule.registration_plan(st.cat, top, req, cfg)
-                out["change"] = schedule.describe_change(st.last_top, top) if st.last_top else []
-                st.last_top = top
-            return out
+
+    @app.get("/api/plan/tree")
+    def plan_tree_ep():
+        with st.lock:
+            out = run_generate(8)
+            return {
+                "tree": out["plan_tree"],
+                "problems": out["problems"],
+                "deferrals": out["deferrals"],
+                "notes": out["notes"],
+            }
+
+    # ------------------------------------------------------------------ settings and API key
+    @app.get("/api/settings")
+    def get_settings():
+        return settings.public_view()
+
+    @app.put("/api/settings")
+    def put_settings(body: SettingsIn):
+        key = (body.anthropic_key or "").strip()
+        if key and (len(key) < 20 or any(c.isspace() for c in key)):
+            fail(422, "That does not look like an API key. Paste the whole key with no spaces.")
+        settings.update(
+            key=key or None, clear_key=body.clear_key, default=body.default_model, models=body.models
+        )
+        return settings.public_view()
+
+    @app.post("/api/settings/test")
+    def test_key(body: TestKeyIn):
+        key = (body.anthropic_key or "").strip() or settings.get_key()
+        if not key:
+            fail(422, "No key to test. Paste one first.")
+        try:
+            client = anthropic.Anthropic(api_key=key)
+            models = [
+                {"id": m.id, "name": getattr(m, "display_name", m.id)} for m in client.models.list(limit=100)
+            ]
+        except anthropic.AuthenticationError:
+            fail(
+                401,
+                "Anthropic rejected that key. Check that you copied all of it and that it has not been revoked.",
+            )
+        except anthropic.PermissionDeniedError:
+            fail(
+                403,
+                "That key is valid but is not allowed to list models. It may still work for the models you chose.",
+            )
+        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
+            fail(502, f"Could not reach Anthropic ({type(e).__name__}). Check your network and try again.")
+        ids = {m["id"] for m in models}
+        chosen = {t: settings.model_for(t) for t in settings.TASKS}
+        return {
+            "ok": True,
+            "models": models,
+            "chosen": {t: {"model": m, "available": m in ids} for t, m in chosen.items()},
+        }
 
     @app.get("/api/suggestions")
     def suggestions(core: str, limit: int = 40):
@@ -629,7 +812,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             return {
                 "courses": out,
                 "session_saved": (DATA_DIR / "session" / "state.json").exists(),
-                "llm_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+                "llm_configured": settings.key_source() is not None,
             }
 
     @app.get("/api/syllabi/docs")

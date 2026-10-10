@@ -419,3 +419,95 @@ def test_interchangeable_elective_slots_do_not_repeat_the_same_schedule():
     sets = [frozenset(s.unique for s in sch.sections) for sch in res.pool]
     assert len(sets) == len(set(sets)) == 10  # choose 2 of 5 electives, once each
     assert res.nodes < 200
+
+
+# ------------------------------------------------------------------ pinned sections, Core triage, deferrals, comparison
+
+
+def test_pinned_sections_restrict_a_course_to_the_uniques_you_accept():
+    a = mk("00001", "C S 312", days=("M", "W"), start=540, end=600)
+    b = mk("00002", "C S 312", days=("T", "TH"), start=540, end=600)
+    c = mk("00003", "C S 312", days=("F",), start=540, end=600)
+    req = Requirements(required_courses=["C S 312"], pinned_sections={"C S 312": ["00002", "00003"]})
+    res = run([a, b, c], req, PreferenceConfig.model_validate({"hard": {"credit_min": 0}}), k=10)
+    assert {s.sections[0].unique for s in res.pool} == {"00002", "00003"}
+    one = Requirements(required_courses=["C S 312"], pinned_sections={"C S 312": ["00001"]})
+    assert [
+        s.sections[0].unique
+        for s in run([a, b, c], one, PreferenceConfig.model_validate({"hard": {"credit_min": 0}})).pool
+    ] == ["00001"]
+
+
+def test_pins_that_cannot_be_satisfied_are_explained():
+    a = mk("00001", "C S 312", days=("F",), start=540, end=600)
+    req = Requirements(required_courses=["C S 312"], pinned_sections={"C S 312": ["00001"]})
+    res = run([a], req, PreferenceConfig.model_validate({"hard": {"credit_min": 0, "days_off": ["F"]}}))
+    assert not res.schedules and any("you pinned (00001)" in p for p in res.problems)
+
+
+def test_core_area_can_be_like_to_take_instead_of_required():
+    must = mk(1, "C S 312", days=("M", "W"), start=540, end=600)
+    gov = mk(2, "GOV 310L", days=("T", "TH"), start=540, end=600, core=("070",))
+    clash = mk(3, "HIS 315K", days=("M", "W"), start=550, end=610, core=("060",))
+    req = Requirements(required_courses=["C S 312"], preferred_courses=["core:060", "core:070"])
+    cfg = PreferenceConfig.model_validate({"hard": {"credit_min": 0}, "weights": {"wishlist": 1}})
+    top = run([must, gov, clash], req, cfg).schedules[0]
+    assert {s.code for s in top.sections} == {
+        "C S 312",
+        "GOV 310L",
+    }  # History clashes with the required course
+    assert top.wish_included == ["core:070"]
+    only_req = run([must, clash], Requirements(required_courses=["C S 312"], core_areas=["060"]), cfg)
+    assert not only_req.schedules  # the same area as a hard requirement leaves nothing
+
+
+def test_when_nothing_fits_the_search_names_what_to_defer():
+    cs = mk(1, "C S 312", days=("M", "W"), start=540, end=600)
+    m = mk(2, "M 408C", days=("M", "W"), start=550, end=610)
+    gov = mk(3, "GOV 310L", days=("T", "TH"), start=540, end=600, core=("070",))
+    req = Requirements(required_courses=["C S 312", "M 408C"], core_areas=["070"])
+    res = run([cs, m, gov], req, PreferenceConfig.model_validate({"hard": {"credit_min": 0}}))
+    assert not res.schedules
+    labels = {d["label"] for d in res.deferrals}
+    assert labels == {
+        "C S 312",
+        "M 408C",
+    }  # dropping either course frees a schedule; dropping the Core area does not
+
+
+def test_compare_sections_shows_how_each_unique_reshapes_the_schedule():
+    cs_a = mk("00001", "C S 312", days=("M", "W"), start=540, end=600)  # clashes with calculus
+    cs_b = mk("00002", "C S 312", days=("T", "TH"), start=540, end=600)
+    m = mk(3, "M 408C", days=("M", "W"), start=560, end=620)
+    only = mk(4, "E 316L", days=("T", "TH"), start=540, end=600)  # clashes with cs_b
+    req = Requirements(required_courses=["C S 312", "M 408C"], preferred_courses=["E 316L"])
+    cfg = PreferenceConfig.model_validate({"hard": {"credit_min": 0}, "weights": {"wishlist": 1}})
+    rows, _ = S.compare_sections(
+        catalog([cs_a, cs_b, m, only]), req, cfg, idx(), None, "C S 312", ["00001", "00002"]
+    )
+    by = {r.unique: r for r in rows}
+    assert by["00001"].schedule is None  # clashes with the required calculus section
+    assert by["00002"].schedule is not None and by["00002"].delta == 0
+    assert (
+        "E 316L" not in by["00002"].schedule.wish_included
+    )  # E 316L now clashes with the section you picked
+    assert rows[0].unique == "00002"
+
+
+def test_compare_sections_orders_by_utility_and_explains_the_gap():
+    early = mk("00001", "C S 312", days=("M", "W"), start=480, end=540)
+    late = mk("00002", "C S 312", days=("M", "W"), start=840, end=900)
+    cfg = PreferenceConfig.model_validate(
+        {"hard": {"credit_min": 0}, "time_bias": 1, "weights": {"time_of_day": 1}}
+    )
+    rows, _ = S.compare_sections(
+        catalog([early, late]),
+        Requirements(required_courses=["C S 312"]),
+        cfg,
+        idx(),
+        None,
+        "C S 312",
+        ["00001", "00002"],
+    )
+    assert [r.unique for r in rows] == ["00002", "00001"]
+    assert rows[1].delta < 0 and any("Time-of-day fit" in w for w in rows[1].why)

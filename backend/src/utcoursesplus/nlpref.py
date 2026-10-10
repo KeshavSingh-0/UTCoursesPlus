@@ -69,7 +69,7 @@ def propose(request: str, current: PreferenceConfig, client=None) -> dict[str, A
         raise ProposalError("Type what you want first.")
     client = client or llm.get_client()
     user = f"Request: {request.strip()}\n\nCurrent config:\n{json.dumps(current.for_llm())}"
-    p = check_proposal(llm.structured(client, PrefProposal, SYSTEM, user))
+    p = check_proposal(llm.structured(client, PrefProposal, SYSTEM, user, task="preferences"))
     new = current.with_llm_proposal(p.config) if p.config else None
     rows = diff(current, new) if new else []
     reasons = {c.path: c for c in p.changes}

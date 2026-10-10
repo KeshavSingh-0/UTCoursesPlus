@@ -279,7 +279,9 @@ def extract(text: str, client=None) -> tuple[SyllabusExtraction, list[str]]:
             f"Syllabus text is {len(text):,} characters; the limit is {MAX_CHARS:,}. Split it or trim it by hand."
         )
     client = client or llm.get_client()
-    raw = llm.structured(client, SyllabusExtraction, SYSTEM, f"Syllabus:\n\n{text}", max_tokens=6000)
+    raw = llm.structured(
+        client, SyllabusExtraction, SYSTEM, f"Syllabus:\n\n{text}", max_tokens=6000, task="syllabus"
+    )
     return verify_quotes(raw, text)
 
 

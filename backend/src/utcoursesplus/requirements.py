@@ -34,7 +34,11 @@ class AuditParse(Strict):
 class Requirements(Strict):
     core_areas: list[str] = []  # codes still needed, one course each
     required_courses: list[str] = []
-    preferred_courses: list[str] = []  # "like to take", in the student's own ranking, best first
+    # "like to take", best first. An entry is a course code such as 'C S 312', or 'core:040' for a whole Core
+    # area the student would like to cover this semester only if it fits (the rest of the Core is deferred).
+    preferred_courses: list[str] = []
+    # course code -> unique numbers the student will accept; empty or missing means any section
+    pinned_sections: dict[str, list[str]] = {}
     groups: list[RequirementGroup] = []  # choose_from and elective groups
     elective_depts: list[str] = []  # limit electives to these departments; empty = any
     registration_time: str | None = None  # typed in by the user; never read from an account
@@ -108,7 +112,7 @@ def parse_audit(text: str, client=None) -> tuple[AuditParse, int]:
     if not small:
         raise ValueError("No requirement lines found in that text. Paste the audit's requirements section.")
     client = client or llm.get_client()
-    return llm.structured(client, AuditParse, AUDIT_SYSTEM, small, max_tokens=6000), len(small)
+    return llm.structured(client, AuditParse, AUDIT_SYSTEM, small, max_tokens=6000, task="audit"), len(small)
 
 
 def apply_groups(

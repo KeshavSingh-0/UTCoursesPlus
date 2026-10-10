@@ -13,7 +13,7 @@ import math
 from dataclasses import dataclass, field
 
 from .buildings import Buildings
-from .catalog import Catalog, Sec, fmt_time, when_text
+from .catalog import CORE_NAMES, Catalog, Sec, fmt_time, when_text
 from .prefs import WEIGHT_NAMES, PreferenceConfig, TimeBlock
 from .requirements import Requirements
 from .signals import CourseSignal, SignalIndex, instructor_key
@@ -144,7 +144,9 @@ class Scorer:
             "seat_availability": seat,
         }
 
-    def schedule_features(self, sections: list[Sec]) -> dict[str, float | None]:
+    def schedule_features(
+        self, sections: list[Sec], keys: list[str] | None = None
+    ) -> dict[str, float | None]:
         by_day = day_intervals(sections)
         days = len(by_day)
         compact = max(0.0, min(1.0, 1 - (days - 2) / 3)) if days else 1.0
@@ -165,7 +167,8 @@ class Scorer:
                         walk_total += w
         wish = None
         if self.wish:
-            got = sum(wt for code, wt in self.wish.items() if any(x.code == code for x in sections))
+            have = set(keys) if keys is not None else {x.code for x in sections}
+            got = sum(wt for key, wt in self.wish.items() if key in have)
             wish = got / sum(self.wish.values())
         return {
             "wishlist": wish,
@@ -174,7 +177,9 @@ class Scorer:
             "walking": (1 / (1 + walk_total / 20.0)) if walk_known else None,
         }
 
-    def utility(self, sections: list[Sec]) -> tuple[float, dict[str, float], dict[str, float]]:
+    def utility(
+        self, sections: list[Sec], keys: list[str] | None = None
+    ) -> tuple[float, dict[str, float], dict[str, float]]:
         """-> (utility, feature values, weighted contributions)."""
         w = self.weights()
         n = len(sections) or 1
@@ -182,7 +187,7 @@ class Scorer:
         sf = [self.section_features(s) for s in sections]
         for f in SECTION_FEATURES:
             feats[f] = sum(x[f] for x in sf) / n
-        feats.update(self.schedule_features(sections))
+        feats.update(self.schedule_features(sections, keys))
         contrib = {f: w[f] * v for f, v in feats.items() if v is not None and w.get(f, 0) > 0}
         total_w = sum(w[f] for f in contrib)
         util = sum(contrib.values()) / total_w if total_w else 0.0
@@ -204,6 +209,7 @@ class Slot:
     note: str = ""
     optional: bool = False  # may be left empty (preferred courses, electives)
     group: str = ""  # slots in one group share candidates; search takes them in a fixed order
+    wish_key: str = ""  # for like-to-take slots: the course code or 'core:CODE' this slot stands for
 
 
 def _best_per_course(secs: list[Sec], scorer: Scorer, cap: int) -> list[Sec]:
@@ -225,20 +231,25 @@ def build_slots(
     notes: list[str] = []
     slots: list[Slot] = []
     taken: set[str] = set(req.required_courses)
-    ok = lambda s: passes_hard(s, cfg)
+    pins = req.pinned_sections
+
+    def ok(s: Sec) -> bool:
+        return passes_hard(s, cfg) and (not pins.get(s.code) or s.unique in pins[s.code])
 
     for code in req.required_courses:
         secs = [s for s in cat.by_code.get(code, []) if ok(s)]
         if not secs:
             total = len(cat.by_code.get(code, []))
-            problems.append(
-                f"{code}: "
-                + (
-                    "no sections are listed for Spring 2027."
-                    if not total
-                    else f"all {total} sections break a hard constraint or are cancelled."
+            if pins.get(code):
+                why = (
+                    f"none of the {len(pins[code])} section(s) you pinned ({', '.join(pins[code])}) "
+                    "fit your constraints, or they are cancelled."
                 )
-            )
+            elif not total:
+                why = "no sections are listed for Spring 2027."
+            else:
+                why = f"all {total} sections break a hard constraint or are cancelled."
+            problems.append(f"{code}: {why}")
         slots.append(Slot(code, "required", _best_per_course(secs, scorer, CAND_PER_SLOT)))
 
     for g in req.groups:
@@ -257,8 +268,6 @@ def build_slots(
                 )
             )
 
-    from .catalog import CORE_NAMES
-
     for code in req.core_areas:
         pool = [
             s for s in cat.active() if code in s.core and s.code not in taken and ok(s) and s.level != "G"
@@ -268,17 +277,34 @@ def build_slots(
         slots.append(Slot(CORE_NAMES.get(code, code), "core", _best_per_course(pool, scorer, CAND_PER_SLOT)))
 
     base = sum(min((s.credits for s in sl.candidates), default=3) for sl in slots)
-    prefs_ = [c for c in req.preferred_courses if c not in taken]
+    prefs_ = [
+        c for c in req.preferred_courses if c not in taken and c not in [f"core:{x}" for x in req.core_areas]
+    ]
     scorer.wish = {c: float(len(prefs_) - i) for i, c in enumerate(prefs_)}
-    for code in prefs_:
-        secs = [s for s in cat.by_code.get(code, []) if ok(s)]
+    for tok in prefs_:
+        if tok.startswith("core:"):
+            area = tok[5:]
+            label = CORE_NAMES.get(area, area)
+            secs = [
+                s for s in cat.active() if area in s.core and s.code not in taken and ok(s) and s.level != "G"
+            ]
+        else:
+            label = tok
+            secs = [s for s in cat.by_code.get(tok, []) if ok(s)]
         if not secs:
             notes.append(
-                f"{code} (like to take) has no eligible sections under your constraints, so it is left out."
+                f"{label} (like to take) has no eligible sections under your constraints, so it is left out."
             )
             continue
         slots.append(
-            Slot(code, "wish", _best_per_course(secs, scorer, CAND_PER_SLOT), "Like to take", optional=True)
+            Slot(
+                label,
+                "wish",
+                _best_per_course(secs, scorer, CAND_PER_SLOT),
+                "Like to take",
+                optional=True,
+                wish_key=tok,
+            )
         )
     need = max(0, math.ceil((cfg.hard.credit_min - base) / 3))
     if need:
@@ -328,6 +354,9 @@ class Schedule:
     features: dict[str, float]
     contributions: dict[str, float]
     wish_included: list[str] = field(default_factory=list)
+    meta: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )  # per section: (slot kind, slot label, wish key)
 
 
 @dataclass
@@ -338,6 +367,7 @@ class Result:
     truncated: bool
     nodes: int
     notes: list[str] = field(default_factory=list)
+    deferrals: list[dict] = field(default_factory=list)  # items whose removal would make a schedule possible
 
 
 def _gaps_ok(sections: list[Sec], max_gap: int | None, max_walk: int | None, b: Buildings) -> bool:
@@ -364,6 +394,8 @@ def generate(
     sig: SignalIndex,
     buildings: Buildings | None = None,
     k: int = 10,
+    node_budget: int = NODE_BUDGET,
+    diagnose: bool = True,
 ) -> Result:
     scorer = Scorer(cfg, sig, buildings or Buildings())
     slots, problems, notes = build_slots(cat, req, cfg, scorer)
@@ -395,6 +427,7 @@ def generate(
             False,
             0,
             notes,
+            suggest_deferrals(cat, req, cfg, sig, buildings) if diagnose else [],
         )
     order = sorted(slots, key=lambda sl: (sl.optional, len(sl.candidates)))
     w = scorer.weights()
@@ -425,6 +458,7 @@ def generate(
     counter = itertools.count()
     state = {"nodes": 0, "trunc": False}
     chosen: list[Sec] = []
+    chosen_meta: list[tuple[str, str, str]] = []
     used_codes: set[str] = set()
     last_pos: dict[str, int] = {}  # group -> position of the last candidate taken (fixed order in a group)
     skipped: set[str] = set()  # groups whose remaining slots must stay empty
@@ -433,7 +467,7 @@ def generate(
         return heap[0][0] if len(heap) >= POOL_SIZE else -1.0
 
     def rec(i: int, credits: int, sec_sum: float) -> None:
-        if state["nodes"] >= NODE_BUDGET:
+        if state["nodes"] >= node_budget:
             state["trunc"] = True
             return
         state["nodes"] += 1
@@ -454,7 +488,8 @@ def generate(
                 return
             if not chosen:
                 return
-            u, feats, contrib = scorer.utility(chosen)
+            keys = [m[2] for m in chosen_meta if m[2]]
+            u, feats, contrib = scorer.utility(chosen, keys)
             sch = Schedule(
                 list(chosen),
                 [sl.label for sl in order],
@@ -462,7 +497,8 @@ def generate(
                 u,
                 feats,
                 contrib,
-                [c for c in scorer.wish if any(x.code == c for x in chosen)],
+                keys,
+                list(chosen_meta),
             )
             item = (u, next(counter), sch)
             if len(heap) < POOL_SIZE:
@@ -483,6 +519,7 @@ def generate(
             if any(meets_overlap(s, c) for c in chosen):
                 continue
             chosen.append(s)
+            chosen_meta.append((slot.kind, slot.label, slot.wish_key))
             used_codes.add(s.code)
             prev = last_pos.get(grp)
             if grp:
@@ -495,6 +532,7 @@ def generate(
                     last_pos[grp] = prev
             used_codes.discard(s.code)
             chosen.pop()
+            chosen_meta.pop()
             if state["trunc"]:
                 return
         if slot.optional:
@@ -530,7 +568,84 @@ def generate(
         if courses not in seen_courses:
             seen_courses.add(courses)
             ranked.append(sch)
-    return Result(ranked[:k], uniq, problems, state["trunc"], state["nodes"], notes)
+    deferrals: list[dict] = []
+    if not ranked and diagnose and not any("no sections" in p or "no eligible" in p for p in problems):
+        deferrals = suggest_deferrals(cat, req, cfg, sig, buildings)
+    return Result(ranked[:k], uniq, problems, state["trunc"], state["nodes"], notes, deferrals)
+
+
+def suggest_deferrals(
+    cat: Catalog, req: Requirements, cfg: PreferenceConfig, sig: SignalIndex, buildings: Buildings | None
+) -> list[dict]:
+    """When nothing fits, find the single required items that, if put off to a later semester, would let a
+    schedule exist. This is the triage the student can act on."""
+    items: list[tuple[str, str, str]] = [("course", c, c) for c in req.required_courses]
+    items += [("core", a, CORE_NAMES.get(a, a)) for a in req.core_areas]
+    if len(items) < 2:
+        return []
+    out = []
+    for kind, key, label in items[:16]:
+        r2 = req.model_copy(deep=True)
+        if kind == "course":
+            r2.required_courses = [c for c in r2.required_courses if c != key]
+        else:
+            r2.core_areas = [a for a in r2.core_areas if a != key]
+        res = generate(cat, r2, cfg, sig, buildings, k=1, node_budget=60_000, diagnose=False)
+        if res.schedules:
+            out.append(
+                {"kind": kind, "key": key, "label": label, "utility": round(res.schedules[0].utility, 3)}
+            )
+    out.sort(key=lambda d: -d["utility"])
+    return out
+
+
+@dataclass
+class SectionComparison:
+    unique: str
+    section: Sec | None
+    schedule: Schedule | None
+    included: bool
+    problems: list[str]
+    utility: float | None = None
+    delta: float | None = None
+    why: list[str] = field(default_factory=list)
+
+
+def compare_sections(
+    cat: Catalog,
+    req: Requirements,
+    cfg: PreferenceConfig,
+    sig: SignalIndex,
+    buildings: Buildings | None,
+    code: str,
+    uniques: list[str],
+) -> tuple[list[SectionComparison], dict[str, float]]:
+    """Best whole schedule if the student gets exactly this unique for the course, for each unique given.
+    Shows how choosing one section of a course reshapes everything else."""
+    weights = Scorer(cfg, sig, buildings or Buildings()).weights()
+    rows: list[SectionComparison] = []
+    for u in uniques:
+        r2 = req.model_copy(deep=True)
+        r2.pinned_sections = {**req.pinned_sections, code: [u]}
+        if code not in r2.required_courses and code not in r2.preferred_courses:
+            r2.required_courses.append(code)
+        res = generate(cat, r2, cfg, sig, buildings, k=1, diagnose=False)
+        top = res.schedules[0] if res.schedules else None
+        included = bool(top and any(x.code == code for x in top.sections))
+        rows.append(
+            SectionComparison(
+                u, cat.sections.get(u), top, included, res.problems, top.utility if top else None
+            )
+        )
+    ranked = sorted((r for r in rows if r.schedule and r.included), key=lambda r: -(r.utility or 0))
+    best = ranked[0] if ranked else None
+    for r in rows:
+        if best and r.schedule and r.included:
+            r.delta = (r.utility or 0) - (best.utility or 0)
+            if r is not best:
+                r.why = explain_vs(best.schedule, r.schedule, weights)
+    rows.sort(key=lambda r: (not (r.schedule and r.included), -(r.utility or 0), r.unique))
+    return rows, weights
 
 
 # ----------------------------------------------------------------------------- explanations

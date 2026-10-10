@@ -133,7 +133,7 @@ def test_generate_reports_why_nothing_fits(client):
 def test_propose_without_api_key_says_what_to_do(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     r = client.post("/api/prefs/propose", json={"request": "no classes before 10"})
-    assert r.status_code == 503 and "ANTHROPIC_API_KEY" in r.json()["detail"]
+    assert r.status_code == 503 and "AI models screen" in r.json()["detail"]
 
 
 def test_imports_change_signals_and_sources_page(client):
@@ -295,3 +295,209 @@ def test_syllabus_jobs_explain_missing_login_and_key(client, tmp_path, monkeypat
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     st.llm_client_factory = __import__("utcoursesplus.llm", fromlist=["get_client"]).get_client
     assert client.post("/api/syllabi/read", json={"doc_ids": [1]}).status_code == 503
+
+
+# ------------------------------------------------------------------ settings, key, models
+
+
+def test_settings_save_key_hides_it_and_picks_models_per_task(client, tmp_path):
+    key = "sk-ant-api03-" + "x" * 40
+    r = client.put(
+        "/api/settings",
+        json={
+            "anthropic_key": key,
+            "models": {"syllabus": "claude-haiku-5-5"},
+            "default_model": "claude-sonnet-5-5",
+        },
+    )
+    assert r.status_code == 200
+    v = r.json()
+    assert v["key_source"] == "saved" and key not in r.text and v["key_hint"].startswith("sk-ant-")
+    assert v["models"]["syllabus"] == "claude-haiku-5-5" and v["default_model"] == "claude-sonnet-5-5"
+    assert (
+        key not in client.get("/api/settings").text
+        and client.get("/api/status").json()["llm_configured"] is True
+    )
+    from utcoursesplus import settings
+
+    assert (
+        settings.model_for("syllabus") == "claude-haiku-5-5"
+        and settings.model_for("audit") == "claude-sonnet-5-5"
+    )
+    assert (tmp_path / "settings.json").stat().st_mode & 0o077 == 0  # readable only by you
+    assert client.put("/api/settings", json={"clear_key": True}).json()["key_source"] is None
+
+
+def test_settings_reject_things_that_are_not_keys(client):
+    assert client.put("/api/settings", json={"anthropic_key": "short"}).status_code == 422
+    assert (
+        client.put(
+            "/api/settings", json={"anthropic_key": "sk-ant- has spaces in it xxxxxxxxxxxx"}
+        ).status_code
+        == 422
+    )
+
+
+def test_saved_key_is_what_the_model_client_uses(monkeypatch):
+    from utcoursesplus import llm, settings
+
+    seen = {}
+
+    class FakeAnthropic:
+        def __init__(self, api_key=None):
+            seen["key"] = api_key
+
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    settings.update(key="sk-ant-" + "k" * 30)
+    llm.get_client()
+    assert seen["key"] == "sk-ant-" + "k" * 30
+
+
+def test_key_test_lists_models_and_flags_unavailable_choices(client, monkeypatch):
+    import anthropic
+
+    class M:
+        def __init__(self, i):
+            self.id, self.display_name = i, i.upper()
+
+    class FakeModels:
+        def list(self, limit=100):
+            return [M("claude-opus-5-5"), M("claude-sonnet-5-5")]
+
+    class FakeAnthropic:
+        def __init__(self, api_key=None):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    client.put("/api/settings", json={"models": {"syllabus": "claude-haiku-5-5"}})
+    r = client.post("/api/settings/test", json={"anthropic_key": "sk-ant-" + "z" * 30}).json()
+    assert r["ok"] and [m["id"] for m in r["models"]] == ["claude-opus-5-5", "claude-sonnet-5-5"]
+    assert r["chosen"]["syllabus"] == {"model": "claude-haiku-5-5", "available": False}
+    assert r["chosen"]["audit"]["available"] is True
+    assert client.post("/api/settings/test", json={}).status_code == 422  # nothing to test
+
+
+def test_key_test_explains_a_rejected_key(client, monkeypatch):
+    import anthropic
+    import httpx
+
+    class Bad:
+        def __init__(self, api_key=None):
+            outer = self
+
+            class Models:
+                def list(self, limit=100):
+                    req = httpx.Request("GET", "https://api.anthropic.com/v1/models")
+                    raise anthropic.AuthenticationError(
+                        "bad", response=httpx.Response(401, request=req), body=None
+                    )
+
+            outer.models = Models()
+
+    monkeypatch.setattr(anthropic, "Anthropic", Bad)
+    r = client.post("/api/settings/test", json={"anthropic_key": "sk-ant-" + "q" * 30})
+    assert r.status_code == 401 and "rejected that key" in r.json()["detail"]
+
+
+# ------------------------------------------------------------------ triage, pins, compare, plan map
+
+
+def test_core_triage_tokens_and_pins_are_validated(client):
+    r = client.put(
+        "/api/requirements",
+        json={
+            "core_areas": ["070"],
+            "preferred_courses": ["core:040", "core:070", "core:999", "E 316L"],
+            "pinned_sections": {"c s 312": ["10001", "10003"], "M 408C": ["10003"]},
+        },
+    ).json()
+    req = r["requirements"]
+    assert req["preferred_courses"] == ["core:040", "E 316L"]  # 070 is already required; 999 is not an area
+    assert req["pinned_sections"] == {"C S 312": ["10001"], "M 408C": ["10003"]}
+    assert (
+        any("10003 is not a section of c s 312" in x for x in r["not_in_schedule"])
+        and "core:999" in r["not_in_schedule"]
+    )
+
+
+def test_add_a_specific_unique_pins_it_and_adds_its_course(client):
+    r = client.post("/api/requirements/add-unique", json={"unique": "10002", "target": "like"})
+    assert r.status_code == 200
+    req = r.json()["requirements"]
+    assert req["preferred_courses"] == ["C S 312"] and req["pinned_sections"] == {"C S 312": ["10002"]}
+    client.post("/api/requirements/add-unique", json={"unique": "10001"})
+    req = client.get("/api/requirements").json()
+    assert (
+        req["pinned_sections"]["C S 312"] == ["10002", "10001"] and req["required_courses"] == []
+    )  # already on a list
+    assert client.post("/api/requirements/add-unique", json={"unique": "99999"}).status_code == 404
+
+
+def test_pinning_changes_what_the_schedule_contains(client):
+    client.put(
+        "/api/requirements", json={"required_courses": ["C S 312"], "pinned_sections": {"C S 312": ["10002"]}}
+    )
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={"k": 3}).json()
+    assert {s["unique"] for sch in r["schedules"] for s in sch["sections"] if s["code"] == "C S 312"} == {
+        "10002"
+    }
+
+
+def test_compare_endpoint_ranks_the_sections_of_one_course(client):
+    client.put("/api/requirements", json={"required_courses": ["C S 312"]})
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/compare", json={"code": "c s 312"}).json()
+    assert r["code"] == "C S 312" and r["in_plan_as"] == "required"
+    assert [row["unique"] for row in r["rows"]] and {row["unique"] for row in r["rows"]} == {"10001", "10002"}
+    assert r["rows"][0]["delta"] == 0 and all(row["schedule"] for row in r["rows"] if row["fits"])
+    assert (
+        client.post("/api/schedules/compare", json={"code": "c s 312", "uniques": ["10001"]}).status_code
+        == 422
+    )
+    assert client.post("/api/schedules/compare", json={"code": "zz 1"}).status_code == 422
+
+
+def test_deferral_suggestions_reach_the_api_when_nothing_fits(client):
+    # 3 + 4 + 3 credit hours of requirements against a 7-hour maximum: dropping any one of them makes it possible
+    client.put("/api/requirements", json={"required_courses": ["C S 312", "M 408C"], "core_areas": ["070"]})
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0, "credit_max": 7})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={}).json()
+    assert r["schedules"] == [] and "at least 10 credit hours" in r["problems"][0]
+    assert {(d["kind"], d["key"]) for d in r["deferrals"]} == {
+        ("course", "C S 312"),
+        ("course", "M 408C"),
+        ("core", "070"),
+    }
+
+
+def test_plan_map_groups_the_plan_and_explains_what_was_left_out(client):
+    client.put(
+        "/api/requirements",
+        json={
+            "required_courses": ["C S 312"],
+            "core_areas": ["070"],
+            "preferred_courses": ["E 316L", "core:050"],
+        },
+    )
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0, "credit_max": 12})
+    client.put("/api/prefs", json={"config": cfg})
+    t = client.get("/api/plan/tree").json()["tree"]
+    ids = [g["id"] for g in t["groups"]]
+    assert ids[:2] == ["required", "core"] and "like" in ids
+    req = next(g for g in t["groups"] if g["id"] == "required")["items"][0]
+    assert req["code"] == "C S 312" and req["options"][0]["planned"] and len(req["options"]) == 2
+    core = next(g for g in t["groups"] if g["id"] == "core")["items"][0]
+    assert core["code"] == "GOV 310L" and core["area"] == "American and Texas Government"
+    like = next(g for g in t["groups"] if g["id"] == "like")["items"]
+    assert [i["key"] for i in like] == ["E 316L", "core:050"]  # in the student's ranking
+    assert all(i["included"] or i["reason"] for i in like)
