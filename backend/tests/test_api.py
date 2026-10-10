@@ -300,59 +300,193 @@ def test_syllabus_jobs_explain_missing_login_and_key(client, tmp_path, monkeypat
 # ------------------------------------------------------------------ settings, key, models
 
 
-def test_settings_save_key_hides_it_and_picks_models_per_task(client, tmp_path):
+def test_settings_save_keys_hides_them_and_picks_a_provider_and_model_per_task(client, tmp_path):
     key = "sk-ant-api03-" + "x" * 40
+    okey = "sk-proj-" + "y" * 40
     r = client.put(
         "/api/settings",
         json={
-            "anthropic_key": key,
-            "models": {"syllabus": "claude-haiku-5-5"},
-            "default_model": "claude-sonnet-5-5",
+            "keys": {"anthropic": key, "openai": okey},
+            "tasks": {"syllabus": "openai:gpt-5-mini"},
+            "default": "anthropic:claude-sonnet-5-5",
         },
     )
     assert r.status_code == 200
     v = r.json()
-    assert v["key_source"] == "saved" and key not in r.text and v["key_hint"].startswith("sk-ant-")
-    assert v["models"]["syllabus"] == "claude-haiku-5-5" and v["default_model"] == "claude-sonnet-5-5"
+    assert key not in r.text and okey not in r.text
     assert (
-        key not in client.get("/api/settings").text
-        and client.get("/api/status").json()["llm_configured"] is True
+        v["providers"]["anthropic"]["key_source"] == "saved"
+        and v["providers"]["gemini"]["key_source"] is None
     )
+    assert v["providers"]["openai"]["key_hint"].startswith("sk-proj")
+    assert v["tasks"]["syllabus"] == "openai:gpt-5-mini" and v["default"] == "anthropic:claude-sonnet-5-5"
+    assert key not in client.get("/api/settings").text
+    assert client.get("/api/status").json()["llm_configured"] is True
     from utcoursesplus import settings
 
-    assert (
-        settings.model_for("syllabus") == "claude-haiku-5-5"
-        and settings.model_for("audit") == "claude-sonnet-5-5"
-    )
+    assert settings.resolve("syllabus") == ("openai", "gpt-5-mini")
+    assert settings.resolve("audit") == ("anthropic", "claude-sonnet-5-5")
     assert (tmp_path / "settings.json").stat().st_mode & 0o077 == 0  # readable only by you
-    assert client.put("/api/settings", json={"clear_key": True}).json()["key_source"] is None
+    after = client.put("/api/settings", json={"clear_keys": ["anthropic"]}).json()
+    assert (
+        after["providers"]["anthropic"]["key_source"] is None and after["providers"]["openai"]["key_source"]
+    )
+    assert client.get("/api/status").json()["llm_configured"] is False  # default model's provider has no key
 
 
-def test_settings_reject_things_that_are_not_keys(client):
-    assert client.put("/api/settings", json={"anthropic_key": "short"}).status_code == 422
+def test_settings_reject_bad_keys_models_and_addresses(client):
+    assert client.put("/api/settings", json={"keys": {"openai": "short"}}).status_code == 422
     assert (
         client.put(
-            "/api/settings", json={"anthropic_key": "sk-ant- has spaces in it xxxxxxxxxxxx"}
+            "/api/settings", json={"keys": {"openai": "sk- has spaces in it xxxxxxxxxxxx"}}
         ).status_code
         == 422
     )
+    assert client.put("/api/settings", json={"keys": {"nobody": "k" * 30}}).status_code == 422
+    assert client.put("/api/settings", json={"default": "gpt-5"}).status_code == 422  # provider missing
+    assert client.put("/api/settings", json={"tasks": {"syllabus": "mystery:x"}}).status_code == 422
+    assert client.put("/api/settings", json={"custom_base_url": "ftp://x"}).status_code == 422
 
 
-def test_saved_key_is_what_the_model_client_uses(monkeypatch):
+def test_old_settings_files_are_still_read(tmp_path):
+    import json
+
+    from utcoursesplus import settings
+
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {
+                "anthropic_key": "sk-ant-" + "o" * 30,
+                "default_model": "claude-haiku-5-5",
+                "models": {"audit": "claude-sonnet-5-5"},
+            }
+        )
+    )
+    assert settings.get_key("anthropic") == "sk-ant-" + "o" * 30
+    assert settings.resolve("preferences") == ("anthropic", "claude-haiku-5-5")
+    assert settings.resolve("audit") == ("anthropic", "claude-sonnet-5-5")
+
+
+class _Out(__import__("pydantic").BaseModel):
+    answer: int
+
+
+def test_saved_anthropic_key_and_task_model_reach_the_sdk(monkeypatch):
+    import anthropic
+
     from utcoursesplus import llm, settings
 
     seen = {}
 
+    class Resp:
+        stop_reason = "end_turn"
+        parsed_output = _Out(answer=5)
+
     class FakeAnthropic:
         def __init__(self, api_key=None):
             seen["key"] = api_key
+            self.messages = self
 
-    import anthropic
+        def parse(self, **kw):
+            seen["model"] = kw["model"]
+            return Resp()
 
     monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
-    settings.update(key="sk-ant-" + "k" * 30)
-    llm.get_client()
-    assert seen["key"] == "sk-ant-" + "k" * 30
+    settings.update(keys={"anthropic": "sk-ant-" + "k" * 30}, tasks={"audit": "anthropic:claude-haiku-5-5"})
+    out = llm.structured(llm.get_client("audit"), _Out, "s", "u", task="audit")
+    assert out.answer == 5 and seen == {"key": "sk-ant-" + "k" * 30, "model": "claude-haiku-5-5"}
+
+
+def test_get_client_names_the_missing_provider(monkeypatch):
+    import pytest
+
+    from utcoursesplus import llm, settings
+
+    settings.update(default="gemini:gemini-2.5-flash")
+    with pytest.raises(llm.LLMUnavailable, match="Gemini"):
+        llm.get_client("audit")
+
+
+def _fake_post(monkeypatch, replies, seen):
+    import httpx
+
+    def post(url, headers=None, json=None, timeout=None):
+        seen.append({"url": url, "auth": headers["Authorization"], "body": json})
+        body = replies.pop(0)
+        return httpx.Response(200, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+
+def test_other_providers_get_json_mode_and_are_validated(monkeypatch):
+    from utcoursesplus import llm, settings
+
+    settings.update(keys={"xai": "xai-" + "k" * 30}, default="xai:grok-4")
+    seen = []
+    _fake_post(monkeypatch, [{"choices": [{"message": {"content": '```json\n{"answer": 7}\n```'}}]}], seen)
+    out = llm.structured(llm.get_client("audit"), _Out, "sys", "user", task="audit")
+    assert out.answer == 7
+    assert (
+        seen[0]["url"] == "https://api.x.ai/v1/chat/completions"
+        and seen[0]["auth"] == "Bearer xai-" + "k" * 30
+    )
+    assert seen[0]["body"]["model"] == "grok-4" and seen[0]["body"]["response_format"] == {
+        "type": "json_object"
+    }
+    assert "max_tokens" in seen[0]["body"] and "answer" in seen[0]["body"]["messages"][0]["content"]
+
+
+def test_openai_uses_its_own_token_parameter_and_one_retry_on_bad_json(monkeypatch):
+    from utcoursesplus import llm, settings
+
+    settings.update(keys={"openai": "sk-proj-" + "k" * 30}, default="openai:gpt-5")
+    seen = []
+    _fake_post(
+        monkeypatch,
+        [
+            {"choices": [{"message": {"content": '{"answer": "many"}'}}]},
+            {"choices": [{"message": {"content": '{"answer": 3}'}}]},
+        ],
+        seen,
+    )
+    assert llm.structured(llm.get_client("audit"), _Out, "s", "u", task="audit").answer == 3
+    assert "max_completion_tokens" in seen[0]["body"] and len(seen) == 2
+    assert "did not validate" in seen[1]["body"]["messages"][-1]["content"]
+
+
+def test_a_second_bad_reply_and_a_rejected_key_are_explained(monkeypatch):
+    import httpx
+    import pytest
+
+    from utcoursesplus import llm, settings
+
+    settings.update(keys={"gemini": "AIza" + "k" * 30}, default="gemini:gemini-2.5-flash")
+    bad = {"choices": [{"message": {"content": "not json"}}]}
+    _fake_post(monkeypatch, [bad, bad], [])
+    with pytest.raises(llm.LLMUnavailable, match="usable structured answer"):
+        llm.structured(llm.get_client("audit"), _Out, "s", "u", task="audit")
+
+    def deny(url, headers=None, json=None, timeout=None):
+        return httpx.Response(401, json={}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", deny)
+    with pytest.raises(llm.LLMUnavailable, match="rejected the key"):
+        llm.structured(llm.get_client("audit"), _Out, "s", "u", task="audit")
+
+
+def test_custom_provider_needs_an_address_and_uses_it(monkeypatch):
+    import pytest
+
+    from utcoursesplus import llm, settings
+
+    settings.update(keys={"custom": "local-key-" + "k" * 20}, default="custom:llama")
+    with pytest.raises(llm.LLMUnavailable, match="address"):
+        llm.structured(llm.get_client("audit"), _Out, "s", "u", task="audit")
+    settings.update(custom_base_url="http://localhost:11434/v1")
+    seen = []
+    _fake_post(monkeypatch, [{"choices": [{"message": {"content": '{"answer": 1}'}}]}], seen)
+    assert llm.structured(llm.get_client("audit"), _Out, "s", "u", task="audit").answer == 1
+    assert seen[0]["url"] == "http://localhost:11434/v1/chat/completions"
 
 
 def test_key_test_lists_models_and_flags_unavailable_choices(client, monkeypatch):
@@ -371,34 +505,43 @@ def test_key_test_lists_models_and_flags_unavailable_choices(client, monkeypatch
             self.models = FakeModels()
 
     monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
-    client.put("/api/settings", json={"models": {"syllabus": "claude-haiku-5-5"}})
-    r = client.post("/api/settings/test", json={"anthropic_key": "sk-ant-" + "z" * 30}).json()
+    client.put("/api/settings", json={"tasks": {"syllabus": "anthropic:claude-haiku-5-5"}})
+    r = client.post("/api/settings/test", json={"provider": "anthropic", "key": "sk-ant-" + "z" * 30}).json()
     assert r["ok"] and [m["id"] for m in r["models"]] == ["claude-opus-5-5", "claude-sonnet-5-5"]
     assert r["chosen"]["syllabus"] == {"model": "claude-haiku-5-5", "available": False}
     assert r["chosen"]["audit"]["available"] is True
-    assert client.post("/api/settings/test", json={}).status_code == 422  # nothing to test
+    assert (
+        client.post("/api/settings/test", json={"provider": "openai"}).status_code == 422
+    )  # nothing to test
+
+
+def test_key_test_for_other_providers_reads_their_model_list(client, monkeypatch):
+    import httpx
+
+    def get(url, headers=None, timeout=None):
+        assert url == "https://generativelanguage.googleapis.com/v1beta/openai/models"
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "models/gemini-2.5-pro"}, {"id": "models/gemini-2.5-flash"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx, "get", get)
+    client.put("/api/settings", json={"tasks": {"audit": "gemini:gemini-2.5-flash"}})
+    r = client.post("/api/settings/test", json={"provider": "gemini", "key": "AIza" + "q" * 30}).json()
+    assert [m["id"] for m in r["models"]] == ["gemini-2.5-flash", "gemini-2.5-pro"]
+    assert r["chosen"] == {"audit": {"model": "gemini-2.5-flash", "available": True}}
 
 
 def test_key_test_explains_a_rejected_key(client, monkeypatch):
-    import anthropic
     import httpx
 
-    class Bad:
-        def __init__(self, api_key=None):
-            outer = self
+    def get(url, headers=None, timeout=None):
+        return httpx.Response(401, json={}, request=httpx.Request("GET", url))
 
-            class Models:
-                def list(self, limit=100):
-                    req = httpx.Request("GET", "https://api.anthropic.com/v1/models")
-                    raise anthropic.AuthenticationError(
-                        "bad", response=httpx.Response(401, request=req), body=None
-                    )
-
-            outer.models = Models()
-
-    monkeypatch.setattr(anthropic, "Anthropic", Bad)
-    r = client.post("/api/settings/test", json={"anthropic_key": "sk-ant-" + "q" * 30})
-    assert r.status_code == 401 and "rejected that key" in r.json()["detail"]
+    monkeypatch.setattr(httpx, "get", get)
+    r = client.post("/api/settings/test", json={"provider": "openai", "key": "sk-" + "q" * 30})
+    assert r.status_code == 401 and "rejected the key" in r.json()["detail"]
 
 
 # ------------------------------------------------------------------ triage, pins, compare, plan map
@@ -581,3 +724,20 @@ def test_a_core_area_that_needs_two_courses_gets_two_slots(client):
     client.put("/api/prefs", json={"config": cfg})
     r = client.post("/api/schedules/generate", json={}).json()
     assert r["schedules"] == [] or len(r["schedules"][0]["sections"]) == 2
+
+
+def test_replan_endpoint_keeps_registered_sections_and_routes_around_full_ones(client):
+    client.put("/api/requirements", json={"required_courses": ["C S 312", "M 408C"]})
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0})
+    client.put("/api/prefs", json={"config": cfg})
+    first = client.post("/api/schedules/generate", json={}).json()
+    prev = [s["unique"] for s in first["registration"]["steps"]]
+    r = client.post(
+        "/api/plan/replan", json={"registered": ["10003"], "full": ["10001"], "previous": prev}
+    ).json()
+    assert r["registered"][0]["unique"] == "10003"
+    # the only open C S 312 is full, and the other is closed but still a listed option
+    assert all(s["unique"] != "10001" for s in r["registration"]["steps"])
+    assert r["status"] in ("ok", "drop_needed", "better_if_dropped", "stuck", "complete")
+    assert client.post("/api/plan/replan", json={"registered": ["nope"]}).status_code == 200

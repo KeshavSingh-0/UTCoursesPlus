@@ -67,8 +67,19 @@ export type RegStep = {
 };
 export type GenResult = {
   problems: string[]; notes: string[]; truncated: boolean; searched: number; schedules: Schedule[]; backups: Schedule[];
-  registration: { steps: RegStep[]; label: string; registration_time: string | null } | null; weights: Record<string, number>; change: string[];
+  registration: RegPlan | null; weights: Record<string, number>; change: string[];
   deferrals: { kind: "course" | "core"; key: string; label: string; utility: number }[]; plan_tree: PlanTree | null;
+};
+export type RegPlan = { steps: RegStep[]; label: string; registration_time: string | null };
+export type DropAdvice = {
+  drop: { unique: string; code: string; title: string; when: string }[]; gain: number | null; utility: number; credits: number;
+  then_take: { unique: string; code: string; title: string; when: string }[]; why: string[];
+};
+export type Replan = {
+  status: "ok" | "complete" | "better_if_dropped" | "drop_needed" | "stuck";
+  problems: string[]; notes: string[]; changes: string[]; drops: DropAdvice[];
+  registered: { unique: string; code: string; title: string; when: string; credits: number }[]; credits_registered: number;
+  schedules: Schedule[]; registration: RegPlan | null; plan_tree: PlanTree | null;
 };
 export type PlanOption = RegOption & { planned: boolean };
 export type PlanAlt = { code: string; title: string; credits: number; sections: number; rank: number; ease_score: number | null; confidence: string;
@@ -82,9 +93,9 @@ export type PlanTree = {
   groups: { id: "required" | "core" | "like" | "elective"; title: string; items: PlanItem[] }[];
   backups: { index: number; credits: number; utility: number; sections: { unique: string; code: string; title: string; when: string; status: string; shared: boolean }[] }[];
 };
+export type ProviderView = { label: string; key_source: "saved" | "environment" | null; key_hint: string | null; env_var: string; key_prefix: string; fallback_models: string[] };
 export type SettingsView = {
-  key_source: "saved" | "environment" | null; key_hint: string | null; default_model: string; models: Record<string, string>;
-  tasks: Record<string, string>; fallback_models: string[];
+  providers: Record<string, ProviderView>; custom_base_url: string; default: string; tasks: Record<string, string>; task_names: Record<string, string>;
 };
 export type CompareRow = {
   unique: string; section: Section | null; fits: boolean; utility: number | null; delta: number | null; why: string[]; problems: string[]; schedule: Schedule | null;

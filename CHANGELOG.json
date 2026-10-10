@@ -670,6 +670,57 @@
         "The raw file is not stored or committed."
       ],
       "id": 13
+    },
+    {
+      "commit_message": "feat: adaptive registration plan and support for any AI provider",
+      "date": "2026-10-10",
+      "summary": "The registration runner now searches again after each report (got, full, give up, dropped), and the language-model features work with Anthropic, OpenAI, Gemini, xAI or any OpenAI-compatible service.",
+      "files": [
+        "backend/src/utcoursesplus/replan.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/llm.py",
+        "backend/src/utcoursesplus/settings.py",
+        "backend/tests/test_replan.py",
+        "backend/tests/test_api.py",
+        "frontend/src/Registration.tsx",
+        "frontend/src/runner.ts",
+        "frontend/src/runner.test.ts",
+        "frontend/src/Models.tsx",
+        "frontend/src/api.ts",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Adaptive replanning",
+          "how": "POST /api/plan/replan takes registered, full, dropped and skipped sections. Registered sections are fixed into the slot they satisfy (apply_fixed), full ones are excluded, a given-up course also drops its requirement. If no plan fits, each single drop (then pair) is tried and the best is offered; a clearly better plan reachable by one drop is offered as optional."
+        },
+        {
+          "what": "Runner",
+          "how": "Space got it, right arrow full, X give up, left arrow undo. Reports are saved per plan in the browser and the plan is searched again on reload. The cursor logic is pure and tested."
+        },
+        {
+          "what": "Any AI provider",
+          "how": "Anthropic keeps its SDK. OpenAI, Gemini, xAI and custom services share one httpx client using JSON mode, validated by Pydantic with one retry. Keys and a provider:model choice are stored per provider and per job; old settings files are migrated on read."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Giving up on a required course left no plan at all",
+          "cause": "The requirement stayed after its sections were excluded",
+          "fix": "A skipped course is removed from required and like-to-take lists for the search"
+        },
+        {
+          "symptom": "Model picker would lose focus on each keystroke",
+          "cause": "A component defined inside render remounted",
+          "fix": "Built as a plain function"
+        }
+      ],
+      "notes": [
+        "Drop and replan were exercised in headless Chromium on the synthetic demo database; the drop panel used a mocked response. No real provider call was made: the OpenAI-format client is covered by stand-in HTTP tests, so check your first real call.",
+        "Default model names for non-Anthropic providers are placeholders; Test on the AI models screen lists what your key can use."
+      ],
+      "id": 14
     }
   ]
 }

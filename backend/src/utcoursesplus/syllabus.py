@@ -278,7 +278,7 @@ def extract(text: str, client=None) -> tuple[SyllabusExtraction, list[str]]:
         raise ValueError(
             f"Syllabus text is {len(text):,} characters; the limit is {MAX_CHARS:,}. Split it or trim it by hand."
         )
-    client = client or llm.get_client()
+    client = client or llm.get_client("syllabus")
     raw = llm.structured(
         client, SyllabusExtraction, SYSTEM, f"Syllabus:\n\n{text}", max_tokens=6000, task="syllabus"
     )

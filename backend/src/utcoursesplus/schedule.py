@@ -210,6 +210,8 @@ class Slot:
     optional: bool = False  # may be left empty (preferred courses, electives)
     group: str = ""  # slots in one group share candidates; search takes them in a fixed order
     wish_key: str = ""  # for like-to-take slots: the course code or 'core:CODE' this slot stands for
+    codes: frozenset[str] = frozenset()  # course codes this slot accepts (required, choose, like-to-take)
+    area: str = ""  # Core area this slot accepts (core and like-to-take Core slots)
 
 
 def _best_per_course(secs: list[Sec], scorer: Scorer, cap: int) -> list[Sec]:
@@ -267,7 +269,9 @@ def build_slots(
             else:
                 why = f"all {total} sections break a hard constraint or are cancelled."
             problems.append(f"{code}: {why}")
-        slots.append(Slot(code, "required", _best_per_course(secs, scorer, CAND_PER_SLOT)))
+        slots.append(
+            Slot(code, "required", _best_per_course(secs, scorer, CAND_PER_SLOT), codes=frozenset({code}))
+        )
 
     for g in req.groups:
         if g.kind != "choose_from":
@@ -282,6 +286,7 @@ def build_slots(
                     "choose",
                     _best_per_course(pool, scorer, CAND_PER_SLOT),
                     group=f"choose:{g.name}",
+                    codes=frozenset(g.courses),
                 )
             )
 
@@ -300,6 +305,7 @@ def build_slots(
                     "core",
                     _best_per_course(pool, scorer, CAND_PER_SLOT),
                     group=f"core:{code}" if n > 1 else "",
+                    area=code,
                 )
             )
 
@@ -337,6 +343,8 @@ def build_slots(
                     optional=True,
                     wish_key=tok,
                     group=f"wish:{tok}" if n > 1 else "",
+                    codes=frozenset() if tok.startswith("core:") else frozenset({tok}),
+                    area=tok[5:] if tok.startswith("core:") else "",
                 )
             )
     need = max(0, math.ceil((cfg.hard.credit_min - base) / 3))
@@ -373,6 +381,34 @@ def build_slots(
                 )
             )
     return slots, problems, notes
+
+
+def apply_fixed(slots: list[Slot], fixed: list[Sec]) -> list[Slot]:
+    """Sections the student has already registered. Each takes over the slot it satisfies (required, then choose,
+    Core, like-to-take, then elective) and that slot stops being optional; one that satisfies nothing becomes a
+    slot of its own, so it still counts toward credits and conflicts."""
+    order = {"required": 0, "choose": 1, "core": 2, "wish": 3, "elective": 4}
+    free = sorted(range(len(slots)), key=lambda i: order.get(slots[i].kind, 5))
+    used: set[int] = set()
+    extra: list[Slot] = []
+    for f in fixed:
+        hit = None
+        for i in free:
+            sl = slots[i]
+            if i in used:
+                continue
+            if sl.kind == "elective" or f.code in sl.codes or (sl.area and sl.area in f.core):
+                hit = i
+                break
+        if hit is None:
+            extra.append(Slot(f.code, "required", [f], "Already registered", codes=frozenset({f.code})))
+            continue
+        used.add(hit)
+        sl = slots[hit]
+        slots[hit] = Slot(
+            sl.label, sl.kind, [f], "Already registered", False, "", sl.wish_key, sl.codes, sl.area
+        )
+    return slots + extra
 
 
 # ----------------------------------------------------------------------------- search
@@ -429,9 +465,13 @@ def generate(
     k: int = 10,
     node_budget: int = NODE_BUDGET,
     diagnose: bool = True,
+    fixed: list[Sec] | None = None,
 ) -> Result:
     scorer = Scorer(cfg, sig, buildings or Buildings())
     slots, problems, notes = build_slots(cat, req, cfg, scorer)
+    if fixed:
+        slots = apply_fixed(slots, fixed)
+        problems = [p for p in problems if not any(f.code in p.split(":")[0] for f in fixed)]
     if cfg.hard.max_walk_min is not None and not scorer.buildings.available:
         notes.append("Max walking time was not applied: no building coordinates are loaded.")
     if not slots:

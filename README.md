@@ -53,10 +53,17 @@ The crawl resumes from `data/cache/`. Without automation: save result pages from
     uv run utcoursesplus serve
 
 Then open http://127.0.0.1:8000. The three language-model features (plain-English preferences, audit parsing, syllabus
-reading) need an Anthropic API key. Paste it on the AI models screen, where you can also choose which model runs each
-job; it is saved in `data/settings.json` on this computer and never shown again. Setting `ANTHROPIC_API_KEY` in the
-terminal before `serve` also works, and a key saved in the app takes precedence. Keep keys out of chat and out of the
-repository.
+reading) need an API key from any one provider: Anthropic (Claude), OpenAI, Google (Gemini), xAI (Grok), or any service
+that speaks the OpenAI format (set its address too). Paste keys on the AI models screen, where you also choose the
+provider and model for each job, so a cheap model can read syllabi while another handles preferences. Keys are saved in
+`data/settings.json` on this computer and never shown again. The environment variables `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `GEMINI_API_KEY` and `XAI_API_KEY` also work, and a key saved in the app takes precedence. Model names
+are free text, so new models work without an update. Keep keys out of chat and out of the repository.
+
+Degree audit: on Requirements, choose the saved Results page of your Interactive Degree Audit (File, Save Page As, HTML).
+It is read on this computer with no language model. Finished and in-progress courses are hidden from search and plans,
+and each open Core area or course rule can be set to Required now, Like to take, or Not this semester. Name and EID are
+never read, and the file is not kept.
 
 Screens:
 
@@ -69,10 +76,10 @@ Screens:
 - Ranked schedules: calendar, why each ranks where it does, backups. If nothing fits, it names the required items that, if put
   off, would let a schedule exist. The second tab compares the sections of one course.
 - Plan map: one picture of the whole plan (see below).
-- Registration plan: a keyboard runner plus a map of every fallback (see below).
+- Registration plan: an adaptive keyboard runner plus a map of every fallback (see below).
 - Syllabi: choose a subset of courses, read UT's syllabus site for just those, and get a difficulty score (see below).
 - Data sources: what was loaded, when, and what is missing.
-- AI models: your API key and the model for each job.
+- AI models: API keys for any provider, and the provider and model for each job.
 
 ### Specific sections
 
@@ -122,3 +129,12 @@ every value it reports. Syllabus hosted on Simple Syllabus (an outside site) and
 
 `backend/tests/demo_db.py` builds a synthetic database for trying the interface; it is development-only.
 Every change is recorded in `CHANGELOG.json`.
+
+### Adaptive registration
+
+In the runner, Space means you got the section, the right arrow means it was full, X means you give up on the course,
+and the left arrow undoes the last report. After each report the plan is searched again with what you hold fixed and
+what failed removed, so the next steps already account for it, and a short list says what changed. If your registered
+sections leave no possible schedule, it names the fewest sections to drop and the new plan that follows; press the
+button once you have dropped them yourself. If a drop would reach a clearly better schedule it offers that as optional.
+Reports are saved in this browser and restored if you reload. The app never registers or drops anything.

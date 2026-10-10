@@ -53,7 +53,9 @@ class Requirements(Strict):
         self.completed_courses = list(dict.fromkeys(norm))
         done = set(self.completed_courses)
         self.required_courses = [c for c in self.required_courses if " ".join(c.upper().split()) not in done]
-        self.preferred_courses = [c for c in self.preferred_courses if " ".join(c.upper().split()) not in done]
+        self.preferred_courses = [
+            c for c in self.preferred_courses if " ".join(c.upper().split()) not in done
+        ]
         return self
 
 
@@ -124,7 +126,7 @@ def parse_audit(text: str, client=None) -> tuple[AuditParse, int]:
     small = minimize_audit(text)
     if not small:
         raise ValueError("No requirement lines found in that text. Paste the audit's requirements section.")
-    client = client or llm.get_client()
+    client = client or llm.get_client("audit")
     return llm.structured(client, AuditParse, AUDIT_SYSTEM, small, max_tokens=6000, task="audit"), len(small)
 
 

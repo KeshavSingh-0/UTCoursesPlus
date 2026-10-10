@@ -67,7 +67,7 @@ def propose(request: str, current: PreferenceConfig, client=None) -> dict[str, A
     Only the request and the current preferences (without required courses) reach the model."""
     if not request.strip():
         raise ProposalError("Type what you want first.")
-    client = client or llm.get_client()
+    client = client or llm.get_client("preferences")
     user = f"Request: {request.strip()}\n\nCurrent config:\n{json.dumps(current.for_llm())}"
     p = check_proposal(llm.structured(client, PrefProposal, SYSTEM, user, task="preferences"))
     new = current.with_llm_proposal(p.config) if p.config else None

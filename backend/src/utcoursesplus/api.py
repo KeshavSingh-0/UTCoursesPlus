@@ -22,6 +22,7 @@ from . import (
     nlpref,
     plantree,
     prefs,
+    replan,
     requirements,
     schedule,
     settings,
@@ -62,7 +63,7 @@ class State:
         self.jobs: dict[str, Job] = {}
         # replaceable in tests
         self.fetcher_factory = lambda: Fetcher(cookies=load_cookies())
-        self.llm_client_factory = llm.get_client
+        self.llm_client_factory = lambda: llm.get_client("syllabus")
 
     def invalidate(self) -> None:
         self._cat = None
@@ -140,6 +141,15 @@ class GenerateIn(BaseModel):
     k: int = 8
 
 
+class ReplanIn(BaseModel):
+    registered: list[str] = []  # unique numbers the student now holds
+    full: list[str] = []  # unique numbers that were full or refused
+    dropped: list[str] = []  # unique numbers the student dropped on the plan's advice
+    skipped: list[str] = []  # course codes the student has given up on
+    previous: list[str] = []  # unique numbers of the steps they were following, to describe what changed
+    k: int = 8
+
+
 class SyllabusIn(BaseModel):
     course: str
     text: str | None = None
@@ -149,14 +159,16 @@ class SyllabusIn(BaseModel):
 
 
 class SettingsIn(BaseModel):
-    anthropic_key: str | None = None
-    clear_key: bool = False
-    default_model: str | None = None
-    models: dict[str, str] | None = None
+    keys: dict[str, str] = {}  # provider id -> API key to save
+    clear_keys: list[str] = []
+    custom_base_url: str | None = None
+    default: str | None = None  # 'provider:model'
+    tasks: dict[str, str] | None = None  # task -> 'provider:model'; empty string = use the default
 
 
 class TestKeyIn(BaseModel):
-    anthropic_key: str | None = None
+    provider: str = "anthropic"
+    key: str | None = None
 
 
 class AddUniqueIn(BaseModel):
@@ -243,8 +255,8 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
                 "courses": q["courses"],
                 "departments": q["departments"],
                 "has_data": cfg_has_data,
-                "llm_configured": settings.key_source() is not None,
-                "model": settings.default_model(),
+                "llm_configured": settings.configured(),
+                "model": settings.default_spec(),
                 "buildings_loaded": st.buildings.available,
             }
 
@@ -635,6 +647,26 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
         with st.lock:
             return run_generate(body.k)
 
+    @app.post("/api/plan/replan")
+    def plan_replan(body: ReplanIn):
+        with st.lock:
+            cfg = prefs.current(st.con)
+            req = requirements.load(st.con)
+            cfg.hard.required_courses = req.required_courses
+            return replan.replan(
+                st.cat,
+                req,
+                cfg,
+                st.sig,
+                st.buildings,
+                registered=body.registered,
+                full=body.full,
+                skipped=body.skipped,
+                previous=body.previous,
+                dropped=body.dropped,
+                k=max(1, min(body.k, 12)),
+            )
+
     @app.get("/api/courses/sections")
     def course_sections(code: str):
         with st.lock:
@@ -730,43 +762,54 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
 
     @app.put("/api/settings")
     def put_settings(body: SettingsIn):
-        key = (body.anthropic_key or "").strip()
-        if key and (len(key) < 20 or any(c.isspace() for c in key)):
-            fail(422, "That does not look like an API key. Paste the whole key with no spaces.")
+        for p, k in body.keys.items():
+            if p not in settings.PROVIDERS:
+                fail(422, f"Unknown provider {p!r}.")
+            if k.strip() and (len(k.strip()) < 20 or any(c.isspace() for c in k.strip())):
+                fail(422, "That does not look like an API key. Paste the whole key with no spaces.")
+        for p in body.clear_keys:
+            if p not in settings.PROVIDERS:
+                fail(422, f"Unknown provider {p!r}.")
+        specs = [s for s in [body.default, *(body.tasks or {}).values()] if s]
+        for s in specs:
+            if not settings.valid_spec(s):
+                fail(422, f"{s!r} is not a provider and model. Choose both on the AI models screen.")
+        for t in body.tasks or {}:
+            if t not in settings.TASKS:
+                fail(422, f"Unknown job {t!r}.")
+        url = body.custom_base_url
+        if url and not url.strip().startswith(("https://", "http://localhost", "http://127.0.0.1")):
+            fail(
+                422,
+                "The service address must start with https:// (or http://localhost for a model on this computer).",
+            )
         settings.update(
-            key=key or None, clear_key=body.clear_key, default=body.default_model, models=body.models
+            keys=body.keys,
+            clear_keys=body.clear_keys,
+            custom_base_url=url,
+            default=body.default,
+            tasks=body.tasks,
         )
         return settings.public_view()
 
     @app.post("/api/settings/test")
     def test_key(body: TestKeyIn):
-        key = (body.anthropic_key or "").strip() or settings.get_key()
+        if body.provider not in settings.PROVIDERS:
+            fail(422, f"Unknown provider {body.provider!r}.")
+        key = (body.key or "").strip() or settings.get_key(body.provider)
         if not key:
             fail(422, "No key to test. Paste one first.")
         try:
-            client = anthropic.Anthropic(api_key=key)
-            models = [
-                {"id": m.id, "name": getattr(m, "display_name", m.id)} for m in client.models.list(limit=100)
-            ]
-        except anthropic.AuthenticationError:
-            fail(
-                401,
-                "Anthropic rejected that key. Check that you copied all of it and that it has not been revoked.",
-            )
-        except anthropic.PermissionDeniedError:
-            fail(
-                403,
-                "That key is valid but is not allowed to list models. It may still work for the models you chose.",
-            )
-        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
-            fail(502, f"Could not reach Anthropic ({type(e).__name__}). Check your network and try again.")
+            models = llm.list_models(body.provider, key)
+        except llm.LLMUnavailable as e:
+            fail(401 if "rejected" in str(e) else 502, str(e))
         ids = {m["id"] for m in models}
-        chosen = {t: settings.model_for(t) for t in settings.TASKS}
-        return {
-            "ok": True,
-            "models": models,
-            "chosen": {t: {"model": m, "available": m in ids} for t, m in chosen.items()},
-        }
+        chosen = {}
+        for t in settings.TASKS:
+            p, m = settings.resolve(t)
+            if p == body.provider:
+                chosen[t] = {"model": m, "available": m in ids}
+        return {"ok": True, "provider": body.provider, "models": models, "chosen": chosen}
 
     @app.get("/api/suggestions")
     def suggestions(core: str, limit: int = 40):
@@ -912,7 +955,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
             return {
                 "courses": out,
                 "session_saved": (DATA_DIR / "session" / "state.json").exists(),
-                "llm_configured": settings.key_source() is not None,
+                "llm_configured": settings.configured(),
             }
 
     @app.get("/api/syllabi/docs")
