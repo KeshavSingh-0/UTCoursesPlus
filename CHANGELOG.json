@@ -799,6 +799,40 @@
         "Export does not change the 'changed since last search' comparison."
       ],
       "id": 16
+    },
+    {
+      "commit_message": "refactor(ui): simplify screens with closed-by-default detail and a shorter menu",
+      "date": "2026-10-31",
+      "summary": "Each screen now shows its main task first and keeps detail one click away. The menu has four main steps plus a More group.",
+      "files": [
+        "frontend/src/ui.tsx",
+        "frontend/src/styles.css",
+        "frontend/src/App.tsx",
+        "frontend/src/Schedules.tsx",
+        "frontend/src/Preferences.tsx",
+        "frontend/src/Requirements.tsx",
+        "frontend/src/IdaImport.tsx"
+      ],
+      "changes": [
+        {
+          "what": "Menu",
+          "how": "Requirements, Preferences, Schedules and Register are the main steps; Browse courses, Plan map, Syllabi, Data sources and AI models sit under More."
+        },
+        {
+          "what": "Collapsed detail",
+          "how": "New Fold component. The long intro text on every screen sits behind About this screen. Closed by default: why a schedule ranks, score components, backup schedules, course options, electives, both audit imports, add a specific section, the factor sliders and settings history."
+        },
+        {
+          "what": "Schedules",
+          "how": "The section table has six columns instead of eight; the unchanged-top-schedule notice is hidden; shorter requirement intros."
+        }
+      ],
+      "bugs_fixed": [],
+      "notes": [
+        "Page heights dropped about 40% on Requirements, Preferences and Schedules (for example 2802 to 1480 px).",
+        "Checked at 1440 and 390 px with no overflow or console errors."
+      ],
+      "id": 17
     }
   ]
 }

@@ -15,16 +15,17 @@ import { Note } from "./ui";
 
 const SCREENS = [
   { id: "requirements", label: "Requirements", icon: ListChecks },
-  { id: "courses", label: "Courses and sections", icon: Table2 },
+  { id: "courses", label: "Browse courses", icon: Table2 },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
-  { id: "schedules", label: "Ranked schedules", icon: CalendarDays },
+  { id: "schedules", label: "Schedules", icon: CalendarDays },
   { id: "planmap", label: "Plan map", icon: Network },
-  { id: "registration", label: "Registration plan", icon: ClipboardList },
+  { id: "registration", label: "Register", icon: ClipboardList },
   { id: "syllabi", label: "Syllabi", icon: FileText },
   { id: "sources", label: "Data sources", icon: Database },
   { id: "models", label: "AI models", icon: KeyRound },
 ] as const;
 type Id = (typeof SCREENS)[number]["id"];
+const MAIN: string[] = ["requirements", "preferences", "schedules", "registration"];
 
 export function App() {
   const [screen, setScreen] = useState<Id>(() => (SCREENS.find((s) => s.id === location.hash.slice(1))?.id ?? "requirements") as Id);
@@ -61,7 +62,17 @@ export function App() {
         <div className="brand">UT Courses Plus</div>
         <div className="brand-sub">Spring 2027 planner</div>
         <ul>
-          {SCREENS.map(({ id, label, icon: Icon }) => (
+          {SCREENS.filter((s) => MAIN.includes(s.id)).map(({ id, label, icon: Icon }) => (
+            <li key={id}>
+              <button className="link" aria-current={screen === id ? "page" : undefined} onClick={() => go(id)}>
+                <Icon size={16} aria-hidden /> {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <p className="tools-label">More</p>
+        <ul>
+          {SCREENS.filter((s) => !MAIN.includes(s.id)).map(({ id, label, icon: Icon }) => (
             <li key={id}>
               <button className="link" aria-current={screen === id ? "page" : undefined} onClick={() => go(id)}>
                 <Icon size={16} aria-hidden /> {label}

@@ -38,8 +38,18 @@ export function PageHead({ title, children }: { title: string; children?: ReactN
   return (
     <header className="page-head">
       <h1>{title}</h1>
-      {children ? <p>{children}</p> : null}
+      {children ? <details className="about"><summary>About this screen</summary><p>{children}</p></details> : null}
     </header>
+  );
+}
+
+/** A section that starts closed, so a screen shows its main task and keeps detail one click away. */
+export function Fold({ title, hint, children, open }: { title: string; hint?: string; children: ReactNode; open?: boolean }) {
+  return (
+    <details className="fold" open={open}>
+      <summary><span className="fold-title">{title}</span>{hint ? <span className="small muted"> {hint}</span> : null}</summary>
+      <div className="fold-body">{children}</div>
+    </details>
   );
 }
 

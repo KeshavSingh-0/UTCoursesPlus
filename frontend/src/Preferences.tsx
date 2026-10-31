@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Undo2 } from "lucide-react";
 import { api, FEATURE_LABELS, fmtMin, fromTimeInput, toTimeInput } from "./api";
 import type { DiffRow, GenResult, HistoryItem, Prefs, Proposal, Status } from "./api";
-import { Note, PageHead, when } from "./ui";
+import { Fold, Note, PageHead, when } from "./ui";
 
 const DAYS = [["M", "Mon"], ["T", "Tue"], ["W", "Wed"], ["TH", "Thu"], ["F", "Fri"]] as const;
 const WEIGHTS = Object.keys(FEATURE_LABELS) as (keyof Prefs["weights"])[];
@@ -100,26 +100,7 @@ export function PreferencesScreen({ status, onChanged, last }: { status: Status;
         {last && !last.schedules.length && after ? <p className="small warn" style={{ marginTop: 8 }}>No schedule satisfies these settings. See the Schedules screen.</p> : null}
       </section>
 
-      <section className="block" aria-labelledby="w-h">
-        <h2 id="w-h">How much each factor matters</h2>
-        <p className="lede">Drag to set relative importance. Percentages are what the sliders become after they are scaled to total 100%.</p>
-        <div style={{ maxWidth: 760 }}>
-          {WEIGHTS.map((k) => (
-            <div className="slider-row" key={k}>
-              <label htmlFor={`w-${k}`}>{FEATURE_LABELS[k]}</label>
-              <input id={`w-${k}`} type="range" min={0} max={100} value={Math.round(draft.weights[k] * 100)}
-                onChange={(e) => setDraft({ ...draft, weights: { ...draft.weights, [k]: Number(e.target.value) / 100 } })} />
-              <span className="pct">{Math.round((draft.weights[k] / totalW) * 100)}%</span>
-            </div>
-          ))}
-          <div className="slider-row">
-            <label htmlFor="bias">Morning or afternoon (used by time-of-day fit)</label>
-            <input id="bias" type="range" min={-100} max={100} value={Math.round(draft.time_bias * 100)} onChange={(e) => setDraft({ ...draft, time_bias: Number(e.target.value) / 100 })} />
-            <span className="pct">{draft.time_bias < -0.1 ? "AM" : draft.time_bias > 0.1 ? "PM" : "None"}</span>
-          </div>
-          {!status.buildings_loaded ? <p className="small muted" style={{ marginTop: 8 }}>Short walks has no effect until building coordinates are loaded into data/buildings.csv (columns code, lat, lon).</p> : null}
-        </div>
-      </section>
+      
 
       <section className="block" aria-labelledby="h-h">
         <h2 id="h-h">Hard constraints</h2>
@@ -169,9 +150,30 @@ export function PreferencesScreen({ status, onChanged, last }: { status: Status;
         </div>
       </section>
 
-      <section className="block" aria-labelledby="hist-h">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 id="hist-h">History</h2>
+      <Fold title="Fine-tune how much each factor matters">
+<div>
+<p className="lede">Drag to set relative importance. Percentages are what the sliders become after they are scaled to total 100%.</p>
+        <div style={{ maxWidth: 760 }}>
+          {WEIGHTS.map((k) => (
+            <div className="slider-row" key={k}>
+              <label htmlFor={`w-${k}`}>{FEATURE_LABELS[k]}</label>
+              <input id={`w-${k}`} type="range" min={0} max={100} value={Math.round(draft.weights[k] * 100)}
+                onChange={(e) => setDraft({ ...draft, weights: { ...draft.weights, [k]: Number(e.target.value) / 100 } })} />
+              <span className="pct">{Math.round((draft.weights[k] / totalW) * 100)}%</span>
+            </div>
+          ))}
+          <div className="slider-row">
+            <label htmlFor="bias">Morning or afternoon (used by time-of-day fit)</label>
+            <input id="bias" type="range" min={-100} max={100} value={Math.round(draft.time_bias * 100)} onChange={(e) => setDraft({ ...draft, time_bias: Number(e.target.value) / 100 })} />
+            <span className="pct">{draft.time_bias < -0.1 ? "AM" : draft.time_bias > 0.1 ? "PM" : "None"}</span>
+          </div>
+          {!status.buildings_loaded ? <p className="small muted" style={{ marginTop: 8 }}>Short walks has no effect until building coordinates are loaded into data/buildings.csv (columns code, lat, lon).</p> : null}
+        </div>
+      </div>
+</Fold>
+
+      <Fold title="History and undo">
+        <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn" onClick={undo} disabled={history.length < 2}><Undo2 size={14} aria-hidden /> Undo last change</button>
         </div>
         {history.length ? (
@@ -180,7 +182,7 @@ export function PreferencesScreen({ status, onChanged, last }: { status: Status;
             <tbody>{history.map((h) => <tr key={h.id}><td style={{ whiteSpace: "nowrap" }}>{when(h.at)}</td><td>{h.note}</td></tr>)}</tbody>
           </table>
         ) : <p className="muted small">Nothing saved yet. Defaults are in use.</p>}
-      </section>
+      </Fold>
     </div>
   );
 }

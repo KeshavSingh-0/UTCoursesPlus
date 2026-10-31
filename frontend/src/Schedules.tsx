@@ -4,7 +4,7 @@ import { api, FEATURE_LABELS, f2 } from "./api";
 import type { Compare, GenResult, Requirements, Schedule, Section, Status } from "./api";
 import { DeferralNote } from "./Deferrals";
 import { Calendar } from "./Calendar";
-import { ccClass, NoData, Note, PageHead, StatusText } from "./ui";
+import { ccClass, Fold, NoData, Note, PageHead, StatusText } from "./ui";
 
 export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
   status: Status; result: GenResult | null; busy: boolean; error: string; onGenerate: () => Promise<GenResult | null>;
@@ -35,7 +35,7 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
       {result?.notes.map((n) => <div key={n} style={{ marginBottom: 8 }}><Note>{n}</Note></div>)}
       {result?.problems.length ? <Note error>{result.problems.map((p) => <p key={p}>{p}</p>)}</Note> : null}
       {result?.deferrals.length ? <DeferralNote deferrals={result.deferrals} onApplied={() => void run()} /> : null}
-      {result && result.change.length ? <div style={{ margin: "8px 0" }}><Note><p><b>How the top schedule changed since the last search</b></p>{result.change.map((c) => <p key={c}>{c}</p>)}</Note></div> : null}
+      {result && result.change.length && !(result.change.length === 1 && result.change[0].includes("did not change")) ? <div style={{ margin: "8px 0" }}><Note><p><b>How the top schedule changed since the last search</b></p>{result.change.map((c) => <p key={c}>{c}</p>)}</Note></div> : null}
 
       {result?.schedules.length && cur ? (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(200px, 260px) minmax(0, 1fr)", gap: 28, alignItems: "start", marginTop: 8 }} className="sched-grid">
@@ -44,7 +44,7 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
               <button key={i} aria-current={i === idx} onClick={() => setIdx(i)}>
                 <b>{i + 1}</b>
                 <span>
-                  <span style={{ display: "block" }}>{s.credits} credits, utility {f2(s.utility)}</span>
+                  <span style={{ display: "block" }}>{s.credits} credits, score {f2(s.utility)}</span>
                   <span className="small muted">{s.sections.map((x) => x.code).join(", ")}</span>
                 </span>
               </button>
@@ -54,16 +54,17 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
             <h2>Schedule {idx + 1}: {cur.credits} credit hours</h2>
             <Calendar sections={cur.sections} label={`Weekly calendar for schedule ${idx + 1}`} />
             {cur.wish_included ? <WishSummary included={cur.wish_included} /> : null}
-            <SectionTable sections={cur.sections} />
+            <SectionTable sections={cur.sections} compact />
+            <Fold title={`Why this ranks ${idx === 0 ? "first" : `at ${idx + 1}`}`}>
             <div>
-              <h3>Why this ranks {idx === 0 ? "first" : `at ${idx + 1}`}</h3>
               <ul style={{ margin: "6px 0 0", paddingLeft: 20, maxWidth: "80ch" }}>
                 {cur.why?.map((w) => <li key={w}>{w}</li>)}
               </ul>
               <p className="small muted" style={{ marginTop: 4 }}>{idx + 1 < result.schedules.length ? `Compared with schedule ${idx + 2}.` : "This is the last schedule in the list."}</p>
             </div>
+            </Fold>
+            <Fold title="Score components">
             <div>
-              <h3>Score components</h3>
               <p className="small muted">Each value is 0 to 1. Share is how much of the utility it supplies at your weights. Missing ratings, grades or syllabi count against a course instead of being ignored.</p>
               <div style={{ maxWidth: 640, marginTop: 6 }}>
                 {Object.keys(cur.contributions).map((k) => (
@@ -75,13 +76,15 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
                 ))}
               </div>
             </div>
+            </Fold>
           </div>
         </div>
       ) : null}
 
       {result?.backups.length ? (
-        <section className="block" aria-labelledby="bk-h" style={{ marginTop: 28 }}>
-          <h2 id="bk-h">Backup schedules</h2>
+        <div style={{ marginTop: 20 }}><Fold title={`Backup schedules (${result.backups.length})`} hint="in case sections fill before you register">
+        <section aria-labelledby="bk-h">
+          <h2 id="bk-h" className="sr-only">Backup schedules</h2>
           <p className="lede">These share as few sections as possible with schedule 1, in case sections fill before you register.</p>
           <div className="grid2">
             {result.backups.map((b, i) => (
@@ -93,6 +96,7 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
             ))}
           </div>
         </section>
+        </Fold></div>
       ) : null}
       </>) : null}
     </div>
@@ -112,7 +116,26 @@ function WishSummary({ included }: { included: string[] }) {
   );
 }
 
-export function SectionTable({ sections }: { sections: Section[] }) {
+export function SectionTable({ sections, compact }: { sections: Section[]; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div style={{ overflowX: "auto" }}>
+        <table className="t">
+          <thead><tr><th>Unique</th><th>Course</th><th>Meets</th><th>Instructor</th><th>Status</th><th>Ease</th></tr></thead>
+          <tbody>
+            {sections.map((s) => (
+              <tr key={s.unique}>
+                <td className="mono">{s.unique}</td><td><span className="mono">{s.code}</span> <span className="muted small">{s.title}</span></td>
+                <td>{s.when}</td><td>{s.instructors.join("; ") || "Not listed"}</td>
+                <td><StatusText status={s.status} reserved={s.reserved} /></td>
+                <td>{s.signal?.ease_score != null ? f2(s.signal.ease_score) : <span className="muted">none</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   return (
     <div style={{ overflowX: "auto" }}>
       <table className="t">

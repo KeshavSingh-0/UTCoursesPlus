@@ -300,3 +300,19 @@ pre.log { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--navy-200)
 .rtree .node.end { cursor: default; border-style: dashed; background: var(--bg); }
 .rtree .node.end:hover { background: var(--bg); }
 @media (max-width: 900px) { .rtree .branch { grid-template-columns: 1fr; } }
+
+/* simplification: closed-by-default detail */
+.page-head { display: block; }
+.page-head h1 { margin-bottom: 4px; }
+details.about summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; width: fit-content; }
+details.about p { max-width: 70ch; color: var(--muted); margin-top: 6px; }
+details.fold { border-top: 1px solid var(--line); }
+details.fold > summary { cursor: pointer; padding: 14px 0; list-style: none; display: flex; align-items: baseline; gap: 8px; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: "+"; width: 14px; color: var(--orange-600); font-weight: 700; }
+details.fold[open] > summary::before { content: "\2212"; }
+.fold-title { font-size: 1.05rem; font-weight: 600; color: var(--navy-800, var(--navy-900)); }
+.fold-body { padding: 0 0 20px 22px; }
+.nav .tools-label { margin: 16px 12px 4px; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sidebar-muted); }
+@media (max-width: 800px) { .nav .tools-label { display: none; } }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

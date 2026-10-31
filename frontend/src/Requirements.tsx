@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Trash2 } f
 import { api, ApiError, f2 } from "./api";
 import type { CoreArea, Group, Requirements as Req, Section, Status, Suggestion } from "./api";
 import { IdaImport } from "./IdaImport";
-import { Confidence, Interval, NoData, Note, PageHead, StatusText } from "./ui";
+import { Confidence, Fold, Interval, NoData, Note, PageHead, StatusText } from "./ui";
 
 type Tree = { code: string; name: string; n_courses: number }[];
 type CoreMode = "required" | "like" | "defer";
@@ -71,7 +71,7 @@ export function RequirementsScreen({ status }: { status: Status }) {
 
       <section className="block" aria-labelledby="core-h">
         <h2 id="core-h">Core curriculum areas</h2>
-        <p className="lede">For each area you still need, choose how it counts this semester. Required: every schedule must include a course for it. Like to take: included only if it fits, in the order you rank it below. Not this semester: left out of the search entirely.</p>
+        <p className="lede">Mark each area you still need. Required is in every schedule; Like to take only if it fits.</p>
         {areas.map((a) => (
           <div className="triage" key={a.code}>
             <span>{a.name} <span className="muted small">({counts[a.code] ?? 0} {(counts[a.code] ?? 0) === 1 ? "course" : "courses"} offered)</span></span>
@@ -89,7 +89,7 @@ export function RequirementsScreen({ status }: { status: Status }) {
 
       <section className="block" aria-labelledby="req-h">
         <h2 id="req-h">Your courses</h2>
-        <p className="lede">Required courses must be in every schedule. Like to take is optional and ranked: the app includes as many as fit, and when two clash it keeps the one you ranked higher. Core areas you chose above as Like to take rank here too. Drag to rank, or use the move buttons. Open Sections on a course to accept only certain unique numbers.</p>
+        <p className="lede">Required courses are in every schedule. Like to take courses are optional; drag to rank them.</p>
         <div className="grid2" style={{ alignItems: "start" }}>
           <CourseList
             title="Required"
@@ -131,17 +131,20 @@ export function RequirementsScreen({ status }: { status: Status }) {
       </section>
 
       {shownAreas.length ? (
-        <section className="block" aria-labelledby="opts-h">
-          <h2 id="opts-h">Course options</h2>
+        <Fold title="Course options" hint="what could fill each Core area, easiest first">
+        <section aria-labelledby="opts-h">
+          <h2 id="opts-h" className="sr-only">Course options</h2>
           <p className="lede">Courses carrying each Core tag in the registrar schedule, for the areas you required or would like. Ease combines grades, professor difficulty and syllabus lightness where they exist; the range shows how sure that estimate is.</p>
           {shownAreas.map((code) => (
             <AreaOptions key={code} code={code} name={areaName(code)} />
           ))}
         </section>
+        </Fold>
       ) : null}
 
-      <section className="block" aria-labelledby="more-h">
-        <h2 id="more-h">Electives and registration time</h2>
+      <Fold title="Electives and registration time" hint="optional">
+      <section aria-labelledby="more-h">
+        <h2 id="more-h" className="sr-only">Electives and registration time</h2>
         <div className="grid2">
           <label className="field">
             <span>Limit electives to departments (optional)</span>
@@ -157,9 +160,14 @@ export function RequirementsScreen({ status }: { status: Status }) {
           </label>
         </div>
       </section>
+      </Fold>
 
-      <IdaImport areas={areas} onApplied={(r) => setReq(r)} />
-      <AuditPaste onApplied={(r) => setReq(r)} />
+      <Fold title="Import your degree audit" hint="hides finished courses and fills in what you still need">
+        <IdaImport areas={areas} onApplied={(r) => setReq(r)} />
+      </Fold>
+      <Fold title="Paste audit text instead" hint="uses an AI key">
+        <AuditPaste onApplied={(r) => setReq(r)} />
+      </Fold>
     </div>
   );
 }
@@ -283,8 +291,8 @@ function AuditPaste({ onApplied }: { onApplied: (r: Req) => void }) {
     setRes((r) => r && { ...r, groups: r.groups.map((g, j) => (j === i ? { ...g, courses: courses.split(",").map((s) => s.trim()).filter(Boolean) } : g)) });
 
   return (
-    <section className="block" aria-labelledby="audit-h">
-      <h2 id="audit-h">Read requirements from a pasted degree audit</h2>
+    <section aria-labelledby="audit-h">
+      <h2 id="audit-h" className="sr-only">Read requirements from a pasted degree audit</h2>
       <p className="lede">Optional. Paste the requirements part of your audit. Lines that look like names, EIDs, emails or phone numbers are removed on this computer first, and only lines about requirements or courses are sent to the language model. The pasted text is not saved. You review and correct the result before anything is stored.</p>
       <label className="field">
         <span>Audit text</span>
@@ -445,8 +453,7 @@ function AddUnique({ onAdded }: { onAdded: (r: Req) => void }) {
     } catch (e) { setErr((e as Error).message); }
   };
   return (
-    <div style={{ marginTop: 16 }}>
-      <h3>Add a specific section</h3>
+    <div style={{ marginTop: 16 }}><Fold title="Add a specific section" hint="to accept only certain unique numbers">
       <p className="small muted" style={{ maxWidth: "75ch" }}>Type a unique number you already have in mind. Its course goes on the list you choose (if it is not on one), and only that unique is accepted for the course. Add more uniques of the same course to let the search choose between them.</p>
       <div className="row" style={{ marginTop: 6 }}>
         <label className="field"><span className="xs">Unique number</span><input type="text" inputMode="numeric" maxLength={5} value={u} onChange={(e) => setU(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && u.length === 5 && go()} style={{ width: 110 }} /></label>
@@ -456,6 +463,6 @@ function AddUnique({ onAdded }: { onAdded: (r: Req) => void }) {
       </div>
       {msg ? <p className="small good" style={{ marginTop: 4 }}>{msg}</p> : null}
       {err ? <p className="small warn" style={{ marginTop: 4 }}>{err}</p> : null}
-    </div>
+    </Fold></div>
   );
 }

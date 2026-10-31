@@ -58,8 +58,8 @@ export function IdaImport({ areas, onApplied }: { areas: CoreArea[]; onApplied: 
   };
 
   return (
-    <section className="block" aria-labelledby="ida-h">
-      <h2 id="ida-h">Import your degree audit results</h2>
+    <section aria-labelledby="ida-h">
+      <h2 id="ida-h" className="sr-only">Import your degree audit results</h2>
       <p className="lede">Save your audit's Results page from the browser (File, Save Page As, HTML) and choose the file. It is read on this computer without a language model. Courses you have finished or are taking now are hidden from search and plans. Your name and EID are never read or stored, and the file is not kept.</p>
       <label className="field">
         <span>Audit results file</span>
