@@ -125,3 +125,12 @@ def test_giving_up_on_a_required_course_drops_that_requirement_for_the_search():
     r = go(three(), req, cfg(), skipped=["M 408C"])
     assert r["status"] == "ok"
     assert [s["code"] for s in r["registration"]["steps"]] == ["C S 312"]
+
+
+def test_no_requirements_and_a_credit_minimum_does_not_crash_the_search():
+    from utcoursesplus.requirements import Requirements as R
+
+    res = S.generate(
+        catalog([mk(1, "C S 312", level="L")]), R(), PreferenceConfig(), SignalIndex(connect(":memory:"))
+    )
+    assert res.schedules == [] or res.schedules[0].credits >= 0

@@ -765,6 +765,40 @@
         "The real class database could not be uploaded from this environment. It exists only on your computer, because the schedule needs your UT login. Run uv run utcoursesplus export-seed there, then commit and push seed/spring2027.sqlite. The repository's seed folder is empty until you do."
       ],
       "id": 15
+    },
+    {
+      "commit_message": "feat: export every schedule version to a PDF",
+      "date": "2026-10-31",
+      "summary": "Export all as PDF on the Ranked schedules screen downloads one PDF: page one lists the restrictions and writes out the registration backup plans; each ranked and backup schedule then gets a weekly picture, its unique numbers, times, seats, ease scores and schedule score.",
+      "files": [
+        "backend/src/utcoursesplus/pdfexport.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/tests/test_api.py",
+        "backend/tests/test_replan.py",
+        "backend/pyproject.toml",
+        "backend/uv.lock",
+        "frontend/src/Schedules.tsx",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "PDF export",
+          "how": "GET /api/export/schedules.pdf re-runs the search with your saved requirements and preferences and builds the document with reportlab (new dependency). The week picture is drawn directly, with print-safe pastel fills."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Searching with no requirements and a credit minimum raised ZeroDivisionError",
+          "cause": "The bound divided by the number of remaining slots, which is zero when every optional slot is skipped",
+          "fix": "Denominator is at least 1; regression test added"
+        }
+      ],
+      "notes": [
+        "Text pages and layout were checked by rendering the PDF to images; the export button was built and typechecked but not clicked in a browser.",
+        "Export does not change the 'changed since last search' comparison."
+      ],
+      "id": 16
     }
   ]
 }

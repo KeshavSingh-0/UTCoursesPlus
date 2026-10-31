@@ -107,6 +107,9 @@ Work down the left menu. Everything saves as you go.
    plain English (needs an AI key) and approve the proposed changes.
 3. **Ranked schedules.** Press Find schedules. You get ranked, conflict-free schedules with the reasons, backups, and
    a comparison tab for choosing between sections of one course. If nothing fits, it says which requirement to put off.
+   **Export PDF** (button beside Find schedules) downloads every ranked schedule and the backups: page one lists your
+   restrictions and writes out the registration backup plans; each schedule then gets a weekly picture, its unique
+   numbers, times, seat status and ease scores, and the schedule score.
 4. **Registration plan.** On registration day, work through the runner by hand on UT's registration site (see below).
 5. **Optional:** Syllabi, Data sources (ratings, grades) and AI models.
 

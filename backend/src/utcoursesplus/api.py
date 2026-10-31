@@ -11,7 +11,7 @@ from urllib.parse import quote
 import anthropic
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
@@ -20,6 +20,7 @@ from . import (
     ida,
     llm,
     nlpref,
+    pdfexport,
     plantree,
     prefs,
     replan,
@@ -672,6 +673,23 @@ def create_app(
                 dropped=body.dropped,
                 k=max(1, min(body.k, 12)),
             )
+
+    @app.get("/api/export/schedules.pdf")
+    def export_pdf(k: int = 8):
+        with st.lock:
+            keep = st.last_top
+            out = run_generate(max(1, min(k, 25)))
+            st.last_top = keep  # exporting must not change what "changed since last search" compares against
+            if not out["schedules"]:
+                fail(409, (out["problems"] or ["No schedules to export. Find schedules first."])[0])
+            cfg = prefs.current(st.con)
+            req = requirements.load(st.con)
+            data = pdfexport.build_pdf(out, cfg, req)
+        return Response(
+            data,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="utcoursesplus-schedules.pdf"'},
+        )
 
     @app.get("/api/courses/sections")
     def course_sections(code: str):

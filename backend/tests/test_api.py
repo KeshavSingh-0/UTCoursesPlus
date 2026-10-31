@@ -741,3 +741,38 @@ def test_replan_endpoint_keeps_registered_sections_and_routes_around_full_ones(c
     assert all(s["unique"] != "10001" for s in r["registration"]["steps"])
     assert r["status"] in ("ok", "drop_needed", "better_if_dropped", "stuck", "complete")
     assert client.post("/api/plan/replan", json={"registered": ["nope"]}).status_code == 200
+
+
+def test_pdf_export_has_every_version_and_the_backup_plans_first(client):
+    import io
+
+    from pypdf import PdfReader
+
+    client.put("/api/requirements", json={"required_courses": ["C S 312", "M 408C"], "core_areas": ["070"]})
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0, "days_off": ["F"], "earliest_start_min": 480})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.get("/api/export/schedules.pdf", params={"k": 5})
+    assert (
+        r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content[:4] == b"%PDF"
+    )
+    gen = client.post("/api/schedules/generate", json={"k": 5}).json()
+    pages = [pg.extract_text() for pg in PdfReader(io.BytesIO(r.content)).pages]
+    first = pages[0]
+    assert "Restrictions" in first and "Friday" in first and "Registration backup plans" in first
+    assert "C S 312" in first and "If it is full" in first
+    body = "\n".join(pages)
+    for i in range(1, len(gen["schedules"]) + 1):
+        assert f"Schedule {i}" in body
+    for s in gen["schedules"][0]["sections"]:
+        assert s["unique"] in body and s["code"] in body
+    assert "Schedule score" in body and "Ease score" in body
+
+
+def test_pdf_export_says_why_when_there_is_nothing_to_export(client):
+    client.put("/api/requirements", json={"required_courses": ["C S 312", "M 408C"]})
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0, "credit_max": 3})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.get("/api/export/schedules.pdf")
+    assert r.status_code == 409 and r.json()["detail"]

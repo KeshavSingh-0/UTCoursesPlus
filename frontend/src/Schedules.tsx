@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
 import { api, FEATURE_LABELS, f2 } from "./api";
 import type { Compare, GenResult, Requirements, Schedule, Section, Status } from "./api";
 import { DeferralNote } from "./Deferrals";
@@ -27,6 +28,7 @@ export function SchedulesScreen({ status, result, busy, error, onGenerate }: {
       {tab === "ranked" ? (<>
       <div className="row" style={{ marginBottom: 16 }}>
         <button className="btn primary" onClick={run} disabled={busy}>{busy ? "Searching" : result ? "Search again" : "Find schedules"}</button>
+        {result?.schedules.length ? <a className="btn" href="/api/export/schedules.pdf?k=8" download><Download size={14} aria-hidden /> Export all as PDF</a> : null}
         {result ? <span className="small muted">Looked at {result.searched.toLocaleString()} partial schedules.</span> : null}
       </div>
       {error ? <Note error>{error}</Note> : null}

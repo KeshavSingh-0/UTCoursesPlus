@@ -551,7 +551,7 @@ def generate(
             # what is chosen so far and the best single section still available
             mean_ub = max(sec_sum / len(chosen) if chosen else 0.0, suffix_best[i])
         else:
-            mean_ub = (sec_sum + suffix_max[i]) / (len(chosen) + (n_slots - i))
+            mean_ub = (sec_sum + suffix_max[i]) / max(1, len(chosen) + (n_slots - i))
         if mean_ub / total_w + sched_w / total_w <= worst():
             return
         if i == n_slots:
