@@ -1,69 +1,134 @@
 # UTCoursesPlus
 
-Local tool for UT Austin students. It builds a Spring 2027 course database with Core curriculum tags,
-adds optional professor-rating, grade and syllabus signals, and ranks conflict-free schedules with a
-registration checklist. Everything stays on your computer: one SQLite file and a gitignored `data/` folder.
-No paid services except an Anthropic API key for three optional features.
+A tool for UT Austin students, run entirely on your own computer. It keeps a database of every Spring 2027 class with
+its Core curriculum tags, optionally adds professor-rating, grade and syllabus signals, and ranks conflict-free
+schedules with a registration plan that adapts as you register. Your data stays in a local SQLite file and the
+gitignored `data/` folder. The only paid service is an optional AI key for three features.
 
-## One-time setup
+## Quick start
 
-Run these one at a time, and wait for each to finish (do not join them with a single `&`).
+You need three free tools, installed once:
+
+- **uv** (runs the Python side): https://docs.astral.sh/uv/getting-started/installation/
+- **Node.js 20 or newer** (builds the interface once): https://nodejs.org/
+- **git**, to download the project.
+
+Then, in a terminal on macOS or Linux (on Windows, use WSL):
+
+    git clone https://github.com/KeshavSingh-0/UTCoursesPlus.git
+    cd UTCoursesPlus
+    ./start.sh --demo
+
+The first run installs everything (a few minutes) and opens http://127.0.0.1:8000 in your browser. `--demo` uses
+invented sample classes so you can look around right away; a banner on every screen says so. Stop the app with Ctrl+C.
+Later runs start in seconds.
+
+To use real classes instead, leave off `--demo` (see "Get the class database" below):
+
+    ./start.sh
+
+If something does not work, run `cd backend && uv run utcoursesplus doctor`. It lists what is missing.
+
+### Without the script
+
+Run these one at a time and wait for each to finish.
 
     cd backend
     uv sync
-    uv run playwright install chromium
     cd ../frontend
     npm install
     npm run build
+    cd ../backend
+    uv run utcoursesplus serve --open
 
-`playwright install` is only needed for the manual login window.
+Add `--demo` for sample data or `--port 9000` to change the port.
 
-## 1. Load the Spring 2027 schedule
+## Get the class database
 
-The schedule at utdirect.utexas.edu requires your EID, so there is no public source. UT's acceptable-use policy
-(https://security.utexas.edu/policies/aup, sections 5.7 and 5.10) prohibits "unauthorized automated use of a
-service intended solely for human interaction", and UT has not published terms saying scripted access to the
-schedule is allowed. Automated crawling is your decision and your account's risk. The crawler is read-only (GET
-only), identifies itself honestly, waits 3 seconds between requests, caches every page, and stops on 403, 429,
-CAPTCHA or a login redirect. It never registers, adds, drops or joins a waitlist.
+The app needs the Spring 2027 sections. There are three ways, easiest first.
+
+**A. Use a shared database (no login, no crawl).** If the repository contains `seed/spring2027.sqlite`, the app copies
+it into place the first time you start it without `--demo`, and you will see "Loaded N sections". It holds schedule
+facts only: courses, sections, times, rooms, instructors and Core tags. If the `seed` folder is empty, nobody has
+shared one yet; use B or C, then share yours (below).
+
+**B. Crawl it yourself (needs your UT login).** The schedule at utdirect.utexas.edu requires your EID, so there is
+no public source. UT's acceptable-use policy (https://security.utexas.edu/policies/aup, sections 5.7 and 5.10) prohibits
+"unauthorized automated use of a service intended solely for human interaction", and UT has not published terms saying
+scripted access to the schedule is allowed. Crawling is your decision and your account's risk. The crawler is
+read-only (GET only), identifies itself honestly, waits 3 seconds between requests, caches every page, and stops on 403,
+429, CAPTCHA or a login redirect. It never registers, adds, drops or joins a waitlist.
 
     cd backend
+    uv run playwright install chromium
     uv run utcoursesplus login
     uv run utcoursesplus crawl
     uv run utcoursesplus clear-session
 
-`login` opens a visible browser; you type your EID, password and Duo yourself. `crawl` reads every department at
-lower, upper and graduate level plus each Core area; add `--only "C S" 020` to limit it to some departments or Core
-codes. `clear-session` deletes the saved cookies in `data/session/`.
+`playwright install` is needed once. `login` opens a visible browser: you type your EID, password and Duo yourself, and
+the app never sees them. `crawl` reads every department at lower, upper and graduate level plus each Core area and can
+take a while; it is safe to stop and run again, because cached pages are free. Add `--only "C S" 020` to limit it to some
+departments or Core codes. `clear-session` deletes the saved cookies in `data/session/`. If login does not finish by
+itself, open the schedule search page in that window and press Enter in the terminal.
 
-If login does not finish by itself, open the schedule search page in the window and press Enter in the terminal.
-The crawl resumes from `data/cache/`. Without automation: save result pages from your own browser and run
-`uv run utcoursesplus import-html FILE...`, or `import-json FILE`.
+**C. Save pages from your own browser.** Open the schedule results in your browser, save each page (File, Save Page As,
+HTML), and load them: `uv run utcoursesplus import-html FILE...` (or `import-json FILE`).
 
-    uv run utcoursesplus quality
-    uv run utcoursesplus reparse
-    uv run utcoursesplus diagnose
+Check the result with:
 
-`quality` prints counts, parse failures and missing times. `reparse` rebuilds from cached pages after a parser update
-(no requests). `diagnose` writes raw example rows for anomalies to `data/diagnose.txt`.
+    uv run utcoursesplus quality      # counts, parse failures, missing times
+    uv run utcoursesplus reparse      # rebuild from cached pages after a parser update (no requests)
+    uv run utcoursesplus diagnose     # writes raw example rows for anomalies to data/diagnose.txt
 
-## 2. Run the app
+### Share your class database
+
+Once you have loaded the schedule, anyone who clones the project can skip the crawl:
 
     cd backend
-    uv run utcoursesplus serve
+    uv run utcoursesplus export-seed
+    git add ../seed/spring2027.sqlite
+    git commit -m "data: Spring 2027 schedule"
+    git push
 
-Then open http://127.0.0.1:8000. The three language-model features (plain-English preferences, audit parsing, syllabus
-reading) need an API key from any one provider: Anthropic (Claude), OpenAI, Google (Gemini), xAI (Grok), or any service
-that speaks the OpenAI format (set its address too). Paste keys on the AI models screen, where you also choose the
-provider and model for each job, so a cheap model can read syllabi while another handles preferences. Keys are saved in
-`data/settings.json` on this computer and never shown again. The environment variables `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `GEMINI_API_KEY` and `XAI_API_KEY` also work, and a key saved in the app takes precedence. Model names
-are free text, so new models work without an update. Keep keys out of chat and out of the repository.
+`export-seed` writes `seed/spring2027.sqlite` with schedule facts only. Your ratings, grades, syllabi, requirements,
+preferences, settings and API keys are removed, and nothing else under `data/` is ever committed. The schedule
+itself came from a login-only UT site, so check that sharing it is acceptable to you before you push it. Seat status
+in a shared copy is a snapshot; recrawl to refresh it.
 
-Degree audit: on Requirements, choose the saved Results page of your Interactive Degree Audit (File, Save Page As, HTML).
-It is read on this computer with no language model. Finished and in-progress courses are hidden from search and plans,
-and each open Core area or course rule can be set to Required now, Like to take, or Not this semester. Name and EID are
-never read, and the file is not kept.
+## Using the app
+
+Work down the left menu. Everything saves as you go.
+
+1. **Requirements.** Choose which Core areas you need and how each counts this semester: Required now, Like to take, or
+   Not this semester. Add courses to Required or Like to take (drag to rank). To skip typing, choose your saved
+   degree-audit Results page under "Import your degree audit results"; finished courses are then hidden everywhere.
+   Add your registration time if you want it shown on the plan.
+2. **Preferences.** Set credit range, earliest start, days off and the importance sliders, or type what you want in
+   plain English (needs an AI key) and approve the proposed changes.
+3. **Ranked schedules.** Press Find schedules. You get ranked, conflict-free schedules with the reasons, backups, and
+   a comparison tab for choosing between sections of one course. If nothing fits, it says which requirement to put off.
+4. **Registration plan.** On registration day, work through the runner by hand on UT's registration site (see below).
+5. **Optional:** Syllabi, Data sources (ratings, grades) and AI models.
+
+Language-model features (plain-English preferences, audit text parsing, syllabus reading) need an API key from any one
+provider: Anthropic (Claude), OpenAI, Google (Gemini), xAI (Grok), or any OpenAI-compatible service. Paste a key on the AI
+models screen and choose the provider and model for each job. Keys are saved in `data/settings.json` on this computer,
+never shown again, and never committed. The variables `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and
+`XAI_API_KEY` also work. Everything else in the app works with no key. Keep keys out of chat and out of git.
+
+Degree audit import reads your saved Results page on this computer with no AI. Name and EID are never read, and the file is
+not kept.
+
+## Troubleshooting
+
+- **"No sections are loaded yet"**: you started without `--demo` and have no data. Use "Get the class database".
+- **Page not found or blank**: the interface is not built. Run `cd frontend && npm install && npm run build`, then restart.
+- **`uv` or `node` not found**: install them (links above) and open a new terminal.
+- **Port already in use**: `./start.sh --port 9000`.
+- **Stop with Ctrl+C**, restart with `./start.sh`. Your requirements and preferences are kept in `data/utcoursesplus.sqlite`.
+- **Start over**: delete the `data/` folder (this removes your data and settings, not the code).
+- **Crawl stopped with a message**: it stops on purpose when the site blocks or logs you out. Wait, log in again, and rerun;
+  cached pages are not requested again.
 
 Screens:
 
@@ -94,14 +159,6 @@ Required courses, Core areas, like-to-take courses and electives as a tree: each
 the fallbacks in order, a Core area also shows other courses that would cover it, left-out items say why, and the backup
 schedules sit alongside. Click a box to see its details or copy a unique number.
 
-### Registration runner
-
-On the Registration plan screen, with focus not in a text box: Space marks the shown section as registered and moves
-to the next course; Right and Left Arrow move to the next or previous option when a section fills (options that
-overlap a section you already registered are skipped); Up and Down change course; C copies the unique number; X skips a
-course; Backspace undoes. The unique number is also copied automatically whenever the highlighted option changes
-(a checkbox turns that off). Progress is kept in your browser. The tree below the runner shows every case at a glance.
-
 ### Syllabi from UT's syllabus site
 
 The site (utdirect.utexas.edu/apps/student/coursedocs) needs your EID, like the schedule, and UT has not said in
@@ -127,7 +184,7 @@ every value it reports. Syllabus hosted on Simple Syllabus (an outside site) and
     cd backend && uv run pytest && uv run ruff check src tests
     cd frontend && npm run typecheck && npm test && npm run contrast
 
-`backend/tests/demo_db.py` builds a synthetic database for trying the interface; it is development-only.
+`uv run utcoursesplus serve --demo` runs the app on invented sample data (see `backend/src/utcoursesplus/demo.py`).
 Every change is recorded in `CHANGELOG.json`.
 
 ### Adaptive registration

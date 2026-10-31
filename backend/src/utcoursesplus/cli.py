@@ -27,6 +27,71 @@ def _samples(con) -> None:
         print(" | ".join(str(x) for x in tuple(r)))
 
 
+def serve(port: int, demo: bool, open_browser: bool) -> int:
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from .api import DIST_DIR, create_app
+    from .seed import bootstrap, sections_in
+
+    if demo:
+        from .demo import build
+
+        if not sections_in(config.DEMO_DB):
+            print(f"Building synthetic demo data at {config.DEMO_DB} ...")
+            build(config.DEMO_DB)
+        db = config.DEMO_DB
+        print("DEMO MODE: the courses, instructors, times and seats are invented. Not UT data.")
+    else:
+        db = config.DB_PATH
+        copied = bootstrap(db)
+        if copied:
+            print(f"Loaded {copied} sections from {config.SEED_DB} (first run on this computer).")
+        n = sections_in(db)
+        print(
+            f"{n} sections loaded."
+            if n
+            else "No schedule loaded yet. The app will explain how; see README section 1."
+        )
+    if not (DIST_DIR / "index.html").exists():
+        print(
+            "The interface is not built yet. In another terminal run: cd frontend && npm install && npm run build",
+            file=sys.stderr,
+        )
+    url = f"http://127.0.0.1:{port}"
+    print(f"Open {url}   (press Ctrl+C to stop)")
+    if open_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    uvicorn.run(create_app(db, demo=demo), host="127.0.0.1", port=port, log_level="warning")
+    return 0
+
+
+def doctor() -> int:
+    import shutil
+
+    from . import settings
+    from .api import DIST_DIR
+    from .seed import sections_in
+
+    rows: list[tuple[bool, str]] = []
+    rows.append((sys.version_info >= (3, 12), f"Python {sys.version.split()[0]} (3.12 or newer needed)"))
+    rows.append((bool(shutil.which("node")), "Node.js found (needed once, to build the interface)"))
+    rows.append(((DIST_DIR / "index.html").exists(), "Interface built (frontend/dist)"))
+    n = sections_in(config.DB_PATH)
+    seeded = sections_in(config.SEED_DB)
+    rows.append((n > 0 or seeded > 0, f"Class database: {n} sections in your data, {seeded} in seed/"))
+    rows.append((settings.configured(), "AI key set (optional; only the three AI features need it)"))
+    for ok, text in rows:
+        print(("ok      " if ok else "MISSING ") + text)
+    if not rows[3][0]:
+        print(
+            "\nNo classes yet: run `uv run utcoursesplus serve --demo` to try the app, or follow README section 1."
+        )
+    return 0 if all(ok for ok, _ in rows[:4]) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="utcoursesplus")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -56,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("quality", help="data-quality report")
     sv = sub.add_parser("serve", help="run the local web app")
     sv.add_argument("--port", type=int, default=8000)
+    sv.add_argument("--demo", action="store_true", help="use synthetic sample data instead of your own")
+    sv.add_argument("--open", action="store_true", help="open the app in your browser")
+    sub.add_parser("doctor", help="check that everything needed to run the app is in place")
+    sd = sub.add_parser(
+        "export-seed", help="write seed/spring2027.sqlite (schedule facts only) to commit and share"
+    )
+    sd.add_argument("--db", type=Path, help="database to export (default: your own)")
     for name, hlp in (
         ("import-ratings", "CSV of professor ratings"),
         ("import-grades", "CSV of grade distributions"),
@@ -92,18 +164,30 @@ def main(argv: list[str] | None = None) -> int:
 
         print("Session deleted." if clear_session() else "No saved session.")
         return 0
+    if a.cmd == "doctor":
+        return doctor()
+    if a.cmd == "export-seed":
+        from .seed import export_seed
+
+        try:
+            dest, n = export_seed(a.db or config.DB_PATH)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        print(f"Wrote {n} sections to {dest}.")
+        print("It holds schedule facts only: no ratings, grades, syllabi, requirements, settings or keys.")
+        print(
+            f"To share it: git add {dest.parent.name}/{dest.name} && git commit -m 'data: Spring 2027 schedule' && git push"
+        )
+        return 0
+    if a.cmd == "serve":
+        return serve(a.port, a.demo, a.open)
     con = connect()
     if a.cmd == "import-html":
         n = import_html_files(con, a.files)
         print(f"Imported {n} sections.")
     elif a.cmd == "import-json":
         print(f"Imported {import_json(con, a.file)} sections.")
-    elif a.cmd == "serve":
-        import uvicorn
-
-        from .api import create_app
-
-        uvicorn.run(create_app(), host="127.0.0.1", port=a.port)
     elif a.cmd == "import-ratings":
         from .signals import import_ratings_csv
 

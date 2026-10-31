@@ -721,6 +721,50 @@
         "Default model names for non-Anthropic providers are placeholders; Test on the AI models screen lists what your key can use."
       ],
       "id": 14
+    },
+    {
+      "commit_message": "feat: run locally with one command, shareable class database, clear README",
+      "date": "2026-10-31",
+      "summary": "A fresh clone now runs with ./start.sh (setup, build and open the browser). The class database can be exported as a schedule-facts-only seed that new clones load automatically, and a demo mode runs on invented data.",
+      "files": [
+        "start.sh",
+        "README.md",
+        ".gitignore",
+        "backend/src/utcoursesplus/seed.py",
+        "backend/src/utcoursesplus/demo.py",
+        "backend/src/utcoursesplus/cli.py",
+        "backend/src/utcoursesplus/config.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/tests/test_seed.py",
+        "backend/tests/demo_db.py",
+        "frontend/src/App.tsx",
+        "frontend/src/ui.tsx",
+        "frontend/src/api.ts"
+      ],
+      "changes": [
+        {
+          "what": "start.sh",
+          "how": "Checks for uv and node, installs packages and builds the interface only on first run, then serves and opens the browser; extra options pass through (--demo, --port)."
+        },
+        {
+          "what": "serve --demo",
+          "how": "Builds synthetic data into data/demo.sqlite on demand; a banner on every screen marks it as invented. The generator moved from tests into the package."
+        },
+        {
+          "what": "Shareable database",
+          "how": "export-seed writes seed/spring2027.sqlite with only schedule tables (VACUUM INTO, then personal and signal tables dropped). serve copies it into place when the local database has no sections and never overwrites existing data. .gitignore allows only that one file."
+        },
+        {
+          "what": "doctor command and README",
+          "how": "doctor lists what is missing. README rewritten around quick start, three ways to get classes, a usage walkthrough and troubleshooting; the stale runner section was removed."
+        }
+      ],
+      "bugs_fixed": [],
+      "notes": [
+        "Checked on a clean copy of the tracked files: npm ci, build, uv sync, doctor and ./start.sh --demo all worked and the API answered.",
+        "The real class database could not be uploaded from this environment. It exists only on your computer, because the schedule needs your UT login. Run uv run utcoursesplus export-seed there, then commit and push seed/spring2027.sqlite. The repository's seed folder is empty until you do."
+      ],
+      "id": 15
     }
   ]
 }

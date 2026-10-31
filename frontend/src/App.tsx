@@ -72,6 +72,7 @@ export function App() {
         <p className="foot xs muted">Spring 2027. {status.sections.toLocaleString()} sections loaded. Everything stays on this computer.</p>
       </nav>
       <main id="content" tabIndex={-1}>
+        {status.demo ? <Note error><p><b>Demo data.</b> Every course, instructor, time and seat count here is invented. Stop the app and run it without <code>--demo</code> to use real data.</p></Note> : null}
         {screen === "requirements" && <RequirementsScreen status={status} />}
         {screen === "courses" && <CoursesScreen status={status} />}
         {screen === "preferences" && <PreferencesScreen status={status} onChanged={generate} last={result} />}

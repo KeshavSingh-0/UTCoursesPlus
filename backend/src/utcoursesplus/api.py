@@ -217,7 +217,12 @@ def rmp_link(name: str) -> str:
     return f"https://www.ratemyprofessors.com/search/professors/{UT_RMP_SCHOOL_ID}?q={quote(last)}"
 
 
-def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) -> FastAPI:
+DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+
+def create_app(
+    db_path: Path | str | None = None, dist_dir: Path | None = None, demo: bool = False
+) -> FastAPI:
     app = FastAPI(title="UT Courses Plus", docs_url="/api/docs", openapi_url="/api/openapi.json")
     st = State(db_path)
     app.state.st = st
@@ -255,6 +260,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
                 "courses": q["courses"],
                 "departments": q["departments"],
                 "has_data": cfg_has_data,
+                "demo": demo,
                 "llm_configured": settings.configured(),
                 "model": settings.default_spec(),
                 "buildings_loaded": st.buildings.available,
@@ -1024,7 +1030,7 @@ def create_app(db_path: Path | str | None = None, dist_dir: Path | None = None) 
         }
 
     # ------------------------------------------------------------------ static frontend
-    dist = dist_dir or Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    dist = dist_dir or DIST_DIR
     if dist.exists():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
 

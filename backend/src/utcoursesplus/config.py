@@ -9,6 +9,9 @@ CACHE_DIR = DATA_DIR / "cache"
 SESSION_DIR = DATA_DIR / "session"
 SESSION_FILE = SESSION_DIR / "state.json"
 SAMPLES_DIR = DATA_DIR / "samples"
+SEED_DIR = REPO_ROOT / "seed"  # the one folder of data that is meant to be committed: schedule facts only
+SEED_DB = SEED_DIR / "spring2027.sqlite"
+DEMO_DB = DATA_DIR / "demo.sqlite"
 DB_PATH = Path(os.environ.get("UTCP_DB", DATA_DIR / "utcoursesplus.sqlite"))
 
 TERM = "20272"  # Spring 2027

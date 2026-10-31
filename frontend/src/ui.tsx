@@ -49,7 +49,7 @@ export function NoData() {
       <p>No sections are loaded yet.</p>
       <p>
         In the <code>backend</code> folder, run <code>uv run utcoursesplus login</code> then <code>uv run utcoursesplus crawl</code>, or load saved pages with{" "}
-        <code>uv run utcoursesplus import-html FILE</code>. Then reload this page.
+        <code>uv run utcoursesplus import-html FILE</code>. Then reload this page. To look around first with invented data, stop the app and run <code>uv run utcoursesplus serve --demo</code>.
       </p>
     </Note>
   );

@@ -25,7 +25,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   return res.json() as Promise<T>;
 }
 
-export type Status = { term: string; sections: number; courses: number; departments: number; has_data: boolean; llm_configured: boolean; model: string; buildings_loaded: boolean };
+export type Status = { term: string; sections: number; courses: number; departments: number; has_data: boolean; demo?: boolean; llm_configured: boolean; model: string; buildings_loaded: boolean };
 export type Meet = { days: string[]; start: number; end: number; building: string | null; room: string | null };
 export type Signal = {
   ease: number | null; ease_lo: number | null; ease_hi: number | null;
