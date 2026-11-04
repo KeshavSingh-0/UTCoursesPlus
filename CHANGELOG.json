@@ -833,6 +833,57 @@
         "Checked at 1440 and 390 px with no overflow or console errors."
       ],
       "id": 17
+    },
+    {
+      "commit_message": "feat: consistent schedule builder with either/or choices and no unrequested classes",
+      "date": "2026-11-04",
+      "summary": "Only courses you picked are scheduled. Saved requirements are cleaned by one set of rules, either/or choices are a first-class option, and every section shows why it is in a schedule.",
+      "files": [
+        "backend/src/utcoursesplus/requirements.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/pdfexport.py",
+        "backend/tests/test_schedule.py",
+        "backend/tests/test_api.py",
+        "frontend/src/Requirements.tsx",
+        "frontend/src/Schedules.tsx",
+        "frontend/src/api.ts",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "No unrequested classes",
+          "how": "Filler electives were silently added whenever picks fell short of the credit minimum. They are now off unless you tick 'Fill any shortfall with suggested electives'; otherwise a shortfall gets a message that names the fix."
+        },
+        {
+          "what": "One cleanup rule",
+          "how": "requirements.normalize runs on every load and save: removes duplicates, drops groups already met by a required or finished course, resolves course codes, clamps pick counts, and discards Core slot counts and pinned sections for things no longer on a list. Audit imports no longer pile up duplicate groups."
+        },
+        {
+          "what": "Either/or choices",
+          "how": "The existing choose-from groups got a visible editor: type 'C S 312 or C S 314' and every schedule takes exactly one. Works with ranking, backups, pins, replanning and the PDF."
+        },
+        {
+          "what": "Counts as",
+          "how": "Each section in a schedule, and the PDF, says whether it is Required, Either/or, Core, Like to take or Filler elective."
+        },
+        {
+          "what": "Clear all requirements",
+          "how": "A button on Requirements resets the lists in one step, keeping finished courses."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Classes you had not selected appeared in schedules",
+          "cause": "Automatic filler electives, plus invisible leftovers: duplicate audit groups, pinned sections that restricted Core searches after the course was removed, and stale Core slot counts",
+          "fix": "Filler is opt-in and leftovers are removed on save"
+        }
+      ],
+      "notes": [
+        "Existing databases: filler electives are now off. Turn the checkbox on if you relied on them.",
+        "Checked in headless Chromium on demo data: either/or add and remove, shortfall message, clear all."
+      ],
+      "id": 18
     }
   ]
 }

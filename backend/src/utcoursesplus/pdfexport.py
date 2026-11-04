@@ -245,7 +245,10 @@ def _section_table(sections: list[dict], st, width: float) -> Table:
         rows.append(
             [
                 p(s["unique"], st["cellb"]),
-                p(f"{s['code']} {s['title']}", st["cell"]),
+                p(
+                    f"{s['code']} {s['title']}" + (f" ({s['counts_as']})" if s.get("counts_as") else ""),
+                    st["cell"],
+                ),
                 p(s["when"], st["cell"]),
                 p(where, st["cell"]),
                 p("; ".join(s["instructors"]) or "-", st["cell"]),

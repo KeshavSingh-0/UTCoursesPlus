@@ -115,19 +115,7 @@ export function RequirementsScreen({ status }: { status: Status }) {
         </div>
         {warn.map((w) => <p key={w} className="small warn" style={{ marginTop: 6 }}>{w}</p>)}
         <AddUnique onAdded={(r) => setReq(r)} />
-        {req.groups.length ? (
-          <div style={{ marginTop: 16 }}>
-            <h3>Pick-from groups</h3>
-            <ul className="list-plain" style={{ marginTop: 6 }}>
-              {req.groups.map((g, i) => (
-                <li key={i} className="small">
-                  {g.name}: take {g.pick} of {g.courses.join(", ")}{" "}
-                  <button className="btn text" onClick={() => save({ ...req, groups: req.groups.filter((_, j) => j !== i) })}>Remove</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        <EitherOr groups={req.groups} onChange={(groups) => save({ ...req, groups })} />
       </section>
 
       {shownAreas.length ? (
@@ -145,6 +133,10 @@ export function RequirementsScreen({ status }: { status: Status }) {
       <Fold title="Electives and registration time" hint="optional">
       <section aria-labelledby="more-h">
         <h2 id="more-h" className="sr-only">Electives and registration time</h2>
+        <label className="check" style={{ marginBottom: 12 }}>
+          <input type="checkbox" checked={!!req.fill_electives} onChange={(e) => save({ ...req, fill_electives: e.target.checked })} />
+          <span>Fill any shortfall against my credit minimum with suggested electives. Off by default: only what you picked is scheduled. Suggested courses are marked "Filler elective".</span>
+        </label>
         <div className="grid2">
           <label className="field">
             <span>Limit electives to departments (optional)</span>
@@ -162,12 +154,47 @@ export function RequirementsScreen({ status }: { status: Status }) {
       </section>
       </Fold>
 
+      <div style={{ borderTop: "1px solid var(--line)", padding: "14px 0" }}>
+        <button className="btn danger" onClick={() => { if (window.confirm("Clear every requirement, ranking, either/or choice and pinned section?")) void save({ core_areas: [], required_courses: [], preferred_courses: [], pinned_sections: {}, groups: [], elective_depts: [], registration_time: req.registration_time, completed_courses: req.completed_courses ?? [], core_slots: {}, fill_electives: false }); }}>Clear all requirements</button>
+        <span className="small muted"> Courses finished per your degree audit are kept.</span>
+      </div>
+
       <Fold title="Import your degree audit" hint="hides finished courses and fills in what you still need">
         <IdaImport areas={areas} onApplied={(r) => setReq(r)} />
       </Fold>
       <Fold title="Paste audit text instead" hint="uses an AI key">
         <AuditPaste onApplied={(r) => setReq(r)} />
       </Fold>
+    </div>
+  );
+}
+
+function EitherOr({ groups, onChange }: { groups: Group[]; onChange: (g: Group[]) => void }) {
+  const [text, setText] = useState("");
+  const add = () => {
+    const codes = text.split(/,|\bor\b/i).map((x) => x.trim().toUpperCase()).filter(Boolean);
+    if (codes.length < 2) return;
+    onChange([...groups, { name: codes.join(" or "), kind: "choose_from", core_code: null, courses: codes, pick: 1, credit_hours_needed: null }]);
+    setText("");
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h3>Either/or choices</h3>
+      <p className="small muted" style={{ maxWidth: "75ch" }}>Take exactly one of two or more courses. Every schedule includes one of them, and the schedules show which pairing works best.</p>
+      <ul className="list-plain" style={{ marginTop: 6 }}>
+        {groups.map((g, i) => (
+          <li key={g.name + i} className="row small" style={{ padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
+            <span>Take {g.pick === 1 ? "one" : g.pick} of <b>{g.courses.join(" or ")}</b></span>
+            <button className="btn text" onClick={() => onChange(groups.filter((_, j) => j !== i))}>Remove</button>
+          </li>
+        ))}
+      </ul>
+      <div className="row" style={{ marginTop: 8 }}>
+        <label className="field"><span className="xs">Courses, separated by "or" or commas</span>
+          <input type="text" value={text} placeholder="for example: C S 312 or C S 314" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} style={{ width: 300 }} />
+        </label>
+        <button className="btn" onClick={add} disabled={text.split(/,|\bor\b/i).filter((x) => x.trim()).length < 2}>Add either/or</button>
+      </div>
     </div>
   );
 }

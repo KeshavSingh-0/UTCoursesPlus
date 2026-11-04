@@ -102,6 +102,9 @@ Work down the left menu. Everything saves as you go.
 1. **Requirements.** Choose which Core areas you need and how each counts this semester: Required now, Like to take, or
    Not this semester. Add courses to Required or Like to take (drag to rank). To skip typing, choose your saved
    degree-audit Results page under "Import your degree audit results"; finished courses are then hidden everywhere.
+   For "this class or that one", use **Either/or choices**: add two or more courses and every schedule takes exactly one.
+   Only what you pick is scheduled; suggested filler electives are off unless you tick the box under Electives. Each
+   section in a schedule shows what it counts as (Required, Either/or, Core, Like to take, or Filler elective).
    Add your registration time if you want it shown on the plan.
 2. **Preferences.** Set credit range, earliest start, days off and the importance sliders, or type what you want in
    plain English (needs an AI key) and approve the proposed changes.

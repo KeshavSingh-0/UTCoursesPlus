@@ -44,6 +44,9 @@ class Requirements(Strict):
     # Core area code -> how many courses it still needs (6 hours of government is two); default 1
     core_slots: dict[str, int] = {}
     groups: list[RequirementGroup] = []  # choose_from and elective groups
+    # Off by default: nothing is added that you did not pick. When on, a shortfall against your credit minimum is
+    # filled with the easiest-ranked courses (limited to elective_depts if set), each labelled as filler.
+    fill_electives: bool = False
     elective_depts: list[str] = []  # limit electives to these departments; empty = any
     registration_time: str | None = None  # typed in by the user; never read from an account
 
@@ -63,16 +66,65 @@ def _ensure(con: sqlite3.Connection) -> None:
     con.execute("CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
 
+def _norm(c: str) -> str:
+    return " ".join(c.upper().split())
+
+
+def normalize(req: Requirements, cat: Catalog | None = None) -> Requirements:
+    """One set of rules that keeps saved requirements consistent, so nothing you removed lingers invisibly:
+    no duplicates; a course is required or like-to-take, never both; only either/or groups are kept, each with
+    real, untaken, not-already-required courses and a sensible pick count; Core slot counts and pinned sections
+    exist only for things that are still on your lists."""
+    r = req.model_copy(deep=True)
+    r.required_courses = list(dict.fromkeys(_norm(c) for c in r.required_courses if c.strip()))
+    r.core_areas = list(dict.fromkeys(r.core_areas))
+    r.preferred_courses = [
+        c
+        for c in dict.fromkeys(c if c.startswith("core:") else _norm(c) for c in r.preferred_courses)
+        if c not in r.required_courses and c not in {f"core:{a}" for a in r.core_areas}
+    ]
+    done = set(r.completed_courses)
+    groups: list[RequirementGroup] = []
+    seen: set[tuple] = set()
+    for g in r.groups:
+        if g.kind != "choose_from":
+            continue
+        resolved = list(
+            dict.fromkeys((resolve_code(c, cat) if cat is not None else None) or _norm(c) for c in g.courses)
+        )
+        # a choice already met by something required or taken needs nothing more
+        need = min(g.pick, len(resolved)) - sum(1 for c in resolved if c in r.required_courses or c in done)
+        codes = [c for c in resolved if c not in done and c not in r.required_courses]
+        if need <= 0 or not codes:
+            continue
+        pick = min(need, len(codes))
+        key = (tuple(sorted(codes)), pick)
+        if key in seen:
+            continue
+        seen.add(key)
+        groups.append(g.model_copy(update={"courses": codes, "pick": pick}))
+    r.groups = groups
+    wish_areas = {c[5:] for c in r.preferred_courses if c.startswith("core:")}
+    r.core_slots = {a: n for a, n in r.core_slots.items() if a in r.core_areas or a in wish_areas}
+    listed = set(r.required_courses) | {c for c in r.preferred_courses if not c.startswith("core:")}
+    listed |= {c for g in r.groups for c in g.courses}
+    r.pinned_sections = {c: u for c, u in r.pinned_sections.items() if c in listed and u}
+    return r
+
+
 def load(con: sqlite3.Connection) -> Requirements:
     _ensure(con)
     row = con.execute("SELECT value FROM kv WHERE key='requirements'").fetchone()
-    return Requirements.model_validate_json(row[0]) if row else Requirements()
+    return normalize(Requirements.model_validate_json(row[0])) if row else Requirements()
 
 
-def save(con: sqlite3.Connection, req: Requirements) -> None:
+def save(con: sqlite3.Connection, req: Requirements, cat: Catalog | None = None) -> Requirements:
+    """Stores the requirements after normalizing them, and returns what was actually stored."""
     _ensure(con)
+    req = normalize(req, cat)
     with con:
         con.execute("INSERT OR REPLACE INTO kv VALUES('requirements', ?)", (req.model_dump_json(),))
+    return req
 
 
 def resolve_code(text: str, cat: Catalog) -> str | None:
@@ -155,8 +207,9 @@ def apply_groups(
             for c, rc in zip(g.courses, codes, strict=True):
                 if rc is None:
                     warn.append(f"{c}: not in the Spring 2027 schedule, left out")
-            r.groups.append(g.model_copy(update={"courses": [c for c in codes if c]}))
-    return r, warn
+            if g.kind == "choose_from":
+                r.groups.append(g.model_copy(update={"courses": [c for c in codes if c]}))
+    return normalize(r, cat), warn
 
 
 def dump(req: Requirements) -> str:

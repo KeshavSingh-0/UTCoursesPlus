@@ -121,12 +121,12 @@ export function SectionTable({ sections, compact }: { sections: Section[]; compa
     return (
       <div style={{ overflowX: "auto" }}>
         <table className="t">
-          <thead><tr><th>Unique</th><th>Course</th><th>Meets</th><th>Instructor</th><th>Status</th><th>Ease</th></tr></thead>
+          <thead><tr><th>Unique</th><th>Course</th><th>Counts as</th><th>Meets</th><th>Instructor</th><th>Status</th><th>Ease</th></tr></thead>
           <tbody>
             {sections.map((s) => (
               <tr key={s.unique}>
                 <td className="mono">{s.unique}</td><td><span className="mono">{s.code}</span> <span className="muted small">{s.title}</span></td>
-                <td>{s.when}</td><td>{s.instructors.join("; ") || "Not listed"}</td>
+                <td className="small">{s.counts_as ?? ""}</td><td>{s.when}</td><td>{s.instructors.join("; ") || "Not listed"}</td>
                 <td><StatusText status={s.status} reserved={s.reserved} /></td>
                 <td>{s.signal?.ease_score != null ? f2(s.signal.ease_score) : <span className="muted">none</span>}</td>
               </tr>

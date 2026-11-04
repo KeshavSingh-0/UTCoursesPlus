@@ -401,7 +401,7 @@ def create_app(
                 dict.fromkeys(" ".join(c.upper().split()) for c in req.completed_courses if c.strip())
             )
             req.core_slots = {a: max(1, min(int(n), 6)) for a, n in req.core_slots.items() if a in valid_core}
-            requirements.save(st.con, req)
+            req = requirements.save(st.con, req, st.cat)
             return {"requirements": req.model_dump(), "not_in_schedule": unknown}
 
     @app.post("/api/requirements/audit/parse")
@@ -418,7 +418,7 @@ def create_app(
     def audit_apply(body: GroupsIn):
         with st.lock:
             req, warnings = requirements.apply_groups(requirements.load(st.con), body.groups, st.cat)
-            requirements.save(st.con, req)
+            req = requirements.save(st.con, req, st.cat)
             return {"requirements": req.model_dump(), "warnings": warnings}
 
     # ------------------------------------------------------------------ degree audit (IDA) import, read locally
@@ -480,7 +480,7 @@ def create_app(
                         )
             req.required_courses = [c for c in req.required_courses if c not in req.completed_courses]
             req.preferred_courses = [c for c in req.preferred_courses if c not in req.completed_courses]
-            requirements.save(st.con, req)
+            req = requirements.save(st.con, req, st.cat)
             st.invalidate()
             return {"requirements": req.model_dump(), "warnings": warnings}
 
@@ -720,7 +720,7 @@ def create_app(
             pins = req.pinned_sections.setdefault(sec.code, [])
             if u not in pins:
                 pins.append(u)
-            requirements.save(st.con, req)
+            req = requirements.save(st.con, req, st.cat)
             return {"requirements": req.model_dump(), "added": f"{sec.code} {sec.title}, unique {u}"}
 
     @app.post("/api/schedules/compare")

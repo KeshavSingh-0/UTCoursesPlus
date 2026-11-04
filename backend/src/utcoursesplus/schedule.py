@@ -347,7 +347,7 @@ def build_slots(
                     area=tok[5:] if tok.startswith("core:") else "",
                 )
             )
-    need = max(0, math.ceil((cfg.hard.credit_min - base) / 3))
+    need = max(0, math.ceil((cfg.hard.credit_min - base) / 3)) if req.fill_electives else 0
     if need:
         used_codes = taken | {s.code for sl in slots for s in sl.candidates if sl.kind == "required"}
         pool = [
@@ -486,6 +486,22 @@ def generate(
     if any(not sl.candidates for sl in slots):
         return Result([], [], problems, False, 0, notes)
 
+    max_total = sum(max(x.credits for x in sl.candidates) for sl in slots)
+    if max_total < cfg.hard.credit_min:
+        return Result(
+            [],
+            [],
+            [
+                (
+                    f"Your picks add up to at most {max_total} credit hours, but your minimum is "
+                    f"{cfg.hard.credit_min}. Add a course, lower the credit minimum on Preferences, or turn on "
+                    "'Fill remaining hours with suggested electives' on Requirements."
+                )
+            ],
+            False,
+            0,
+            notes,
+        )
     min_total = sum(min(x.credits for x in sl.candidates) for sl in slots if not sl.optional)
     if min_total > cfg.hard.credit_max:
         return Result(
@@ -924,7 +940,22 @@ def section_json(s: Sec, scorer: Scorer | None = None) -> dict:
     return d
 
 
+def counts_as(kind: str, label: str) -> str:
+    """Plain-language reason a section is in a schedule."""
+    base = label.rsplit(" (", 1)[0] if label.endswith(")") and " of " in label.rsplit(" (", 1)[-1] else label
+    return {
+        "required": "Required",
+        "choose": f"Either/or: {base}",
+        "core": f"Core: {base}",
+        "wish": "Like to take",
+        "elective": "Filler elective",
+    }.get(kind, kind)
+
+
 def schedule_json(sch: Schedule, scorer: Scorer) -> dict:
+    sections = [section_json(s, scorer) for s in sch.sections]
+    for d, m in zip(sections, sch.meta, strict=False):
+        d["counts_as"] = counts_as(m[0], m[1])
     return {
         "wish_included": sch.wish_included,
         "credits": sch.credits,
@@ -932,7 +963,7 @@ def schedule_json(sch: Schedule, scorer: Scorer) -> dict:
         "slots": sch.slots,
         "features": {k: round(v, 3) for k, v in sch.features.items()},
         "contributions": {k: round(v, 4) for k, v in sch.contributions.items()},
-        "sections": [section_json(s, scorer) for s in sch.sections],
+        "sections": sections,
     }
 
 

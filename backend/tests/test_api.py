@@ -552,6 +552,7 @@ def test_core_triage_tokens_and_pins_are_validated(client):
         "/api/requirements",
         json={
             "core_areas": ["070"],
+            "required_courses": ["C S 312", "M 408C"],
             "preferred_courses": ["core:040", "core:070", "core:999", "E 316L"],
             "pinned_sections": {"c s 312": ["10001", "10003"], "M 408C": ["10003"]},
         },
@@ -776,3 +777,49 @@ def test_pdf_export_says_why_when_there_is_nothing_to_export(client):
     client.put("/api/prefs", json={"config": cfg})
     r = client.get("/api/export/schedules.pdf")
     assert r.status_code == 409 and r.json()["detail"]
+
+
+def test_stale_state_is_cleaned_up_when_requirements_are_saved(client):
+    r = client.put(
+        "/api/requirements",
+        json={
+            "required_courses": ["C S 312", "c s 312"],
+            "core_areas": ["070", "070"],
+            "core_slots": {"070": 2, "040": 3},  # 040 is no longer on any list
+            "pinned_sections": {"E 316L": ["10005"], "C S 312": ["10001"]},  # E 316L is not listed
+            "groups": [
+                {"name": "one", "kind": "choose_from", "courses": ["C S 312", "M 408C"], "pick": 1},
+                {"name": "dup", "kind": "choose_from", "courses": ["M 408C", "C S 312"], "pick": 1},
+                {"name": "ignored", "kind": "elective", "courses": ["E 316L"], "pick": 1},
+            ],
+        },
+    ).json()["requirements"]
+    assert r["required_courses"] == ["C S 312"] and r["core_areas"] == ["070"]
+    assert r["core_slots"] == {"070": 2}
+    assert r["pinned_sections"] == {"C S 312": ["10001"]}
+    assert r["groups"] == []  # "C S 312 or M 408C" is already met by the required C S 312
+    assert r["fill_electives"] is False
+
+
+def test_either_or_end_to_end_and_each_section_says_why_it_is_there(client):
+    client.put(
+        "/api/requirements",
+        json={
+            "groups": [
+                {
+                    "name": "C S 312 or M 408C",
+                    "kind": "choose_from",
+                    "courses": ["C S 312", "M 408C"],
+                    "pick": 1,
+                }
+            ]
+        },
+    )
+    cfg = client.get("/api/prefs").json()["config"]
+    cfg["hard"].update({"credit_min": 0})
+    client.put("/api/prefs", json={"config": cfg})
+    r = client.post("/api/schedules/generate", json={"k": 5}).json()
+    assert r["schedules"]
+    for sch in r["schedules"]:
+        assert [s["code"] for s in sch["sections"] if s["code"] in ("C S 312", "M 408C")].__len__() == 1
+        assert sch["sections"][0]["counts_as"] == "Either/or: C S 312 or M 408C"

@@ -128,7 +128,7 @@ def test_credit_range_respected_and_electives_fill_to_minimum():
     secs = [mk(1, "C S 312", days=("M",), start=540, end=600)]
     for i in range(6):
         secs.append(mk(100 + i, f"E 31{i}", days=("T", "TH"), start=540 + 70 * i, end=600 + 70 * i))
-    req = Requirements(required_courses=["C S 312"])
+    req = Requirements(required_courses=["C S 312"], fill_electives=True)
     res = run(secs, req, PreferenceConfig.model_validate({"hard": {"credit_min": 12, "credit_max": 12}}))
     assert res.schedules and all(s.credits == 12 for s in res.schedules)
     assert all(len(s.sections) == 4 for s in res.schedules)
@@ -413,7 +413,7 @@ def test_interchangeable_elective_slots_do_not_repeat_the_same_schedule():
     secs = [mk(1, "C S 312", days=("M",), start=540, end=600)]
     for i in range(5):
         secs.append(mk(100 + i, f"E 31{i}", days=("T", "TH"), start=480 + 70 * i, end=540 + 70 * i))
-    req = Requirements(required_courses=["C S 312"])
+    req = Requirements(required_courses=["C S 312"], fill_electives=True)
     cfg = PreferenceConfig.model_validate({"hard": {"credit_min": 9, "credit_max": 9}})
     res = run(secs, req, cfg, k=50)
     sets = [frozenset(s.unique for s in sch.sections) for sch in res.pool]
@@ -511,3 +511,66 @@ def test_compare_sections_orders_by_utility_and_explains_the_gap():
     )
     assert [r.unique for r in rows] == ["00002", "00001"]
     assert rows[1].delta < 0 and any("Time-of-day fit" in w for w in rows[1].why)
+
+
+# ------------------------------------------------------------------ nothing you did not pick, either/or choices
+
+
+def test_nothing_unselected_is_added_unless_filler_is_switched_on():
+    secs = [mk(1, "C S 312", days=("M",), start=540, end=600)]
+    for i in range(4):
+        secs.append(mk(100 + i, f"E 31{i}", days=("T",), start=540 + 70 * i, end=600 + 70 * i))
+    cfg = PreferenceConfig.model_validate({"hard": {"credit_min": 0, "credit_max": 18}})
+    res = run(secs, Requirements(required_courses=["C S 312"]), cfg)
+    assert res.schedules and all({s.code for s in sch.sections} == {"C S 312"} for sch in res.schedules)
+    on = run(
+        secs,
+        Requirements(required_courses=["C S 312"], fill_electives=True),
+        PreferenceConfig.model_validate({"hard": {"credit_min": 6, "credit_max": 18}}),
+    )
+    assert any(len(sch.sections) > 1 for sch in on.schedules)
+
+
+def test_a_credit_shortfall_names_the_fix_instead_of_adding_classes():
+    res = run([mk(1, "C S 312")], Requirements(required_courses=["C S 312"]))  # default minimum is 12
+    assert not res.schedules and "Fill remaining hours" in res.problems[0]
+
+
+def either_or(codes, pick=1):
+    from utcoursesplus.requirements import RequirementGroup
+
+    return RequirementGroup(name=" or ".join(codes), kind="choose_from", courses=codes, pick=pick)
+
+
+def test_either_or_picks_exactly_one_and_both_choices_get_ranked():
+    secs = [
+        mk(1, "C S 312", days=("M", "W"), start=540, end=600),
+        mk(2, "C S 314", days=("T", "TH"), start=540, end=600),
+        mk(3, "M 408C", days=("M", "W"), start=700, end=760),
+    ]
+    req = Requirements(required_courses=["M 408C"], groups=[either_or(["C S 312", "C S 314"])])
+    res = run(secs, req, PreferenceConfig.model_validate({"hard": {"credit_min": 0}}), k=10)
+    codes = [frozenset(s.code for s in sch.sections) for sch in res.schedules]
+    assert all(len(c) == 2 and "M 408C" in c for c in codes)
+    assert {"C S 312"} in [set(c) - {"M 408C"} for c in codes] and {"C S 314"} in [
+        set(c) - {"M 408C"} for c in codes
+    ]
+    assert all(("C S 312" in c) != ("C S 314" in c) for c in codes)
+
+
+def test_either_or_skips_the_choice_that_clashes_and_explains_each_section():
+    secs = [
+        mk(1, "C S 312", days=("M", "W"), start=540, end=600),
+        mk(2, "C S 314", days=("T", "TH"), start=540, end=600),
+        mk(3, "M 408C", days=("M", "W"), start=550, end=610),
+    ]
+    req = Requirements(required_courses=["M 408C"], groups=[either_or(["C S 312", "C S 314"])])
+    res = run(secs, req, PreferenceConfig.model_validate({"hard": {"credit_min": 0}}))
+    assert {s.code for s in res.schedules[0].sections} == {"M 408C", "C S 314"}
+    assert [S.counts_as(m[0], m[1]) for m in res.schedules[0].meta] == [
+        "Either/or: C S 312 or C S 314",
+        "Required",
+    ] or sorted(S.counts_as(m[0], m[1]) for m in res.schedules[0].meta) == [
+        "Either/or: C S 312 or C S 314",
+        "Required",
+    ]
