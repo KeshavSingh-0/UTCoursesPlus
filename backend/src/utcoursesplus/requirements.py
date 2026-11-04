@@ -1,0 +1,216 @@
+"""What the student still needs. The Core areas and course lists are entered or confirmed by the
+user; a pasted degree audit can be parsed into proposed groups, which are shown for correction
+before anything is saved. The raw audit text is never stored."""
+
+import json
+import re
+import sqlite3
+from typing import Literal
+
+from pydantic import Field, model_validator
+
+from . import llm
+from .catalog import Catalog
+from .models import CORE_AREAS
+from .prefs import Strict
+
+Kind = Literal["core_area", "required_course", "choose_from", "elective"]
+
+
+class RequirementGroup(Strict):
+    name: str
+    kind: Kind
+    core_code: str | None = None  # for core_area: one of the 10 registrar codes
+    courses: list[str] = []  # UT format, e.g. 'C S 312'
+    pick: int = Field(default=1, ge=1, le=12)  # for choose_from: how many to take
+    credit_hours_needed: int | None = Field(default=None, ge=0, le=60)
+
+
+class AuditParse(Strict):
+    groups: list[RequirementGroup] = []
+    notes: str | None = None  # anything the audit said that did not fit a group
+
+
+class Requirements(Strict):
+    core_areas: list[str] = []  # codes still needed, one course each
+    required_courses: list[str] = []
+    # "like to take", best first. An entry is a course code such as 'C S 312', or 'core:040' for a whole Core
+    # area the student would like to cover this semester only if it fits (the rest of the Core is deferred).
+    preferred_courses: list[str] = []
+    # course code -> unique numbers the student will accept; empty or missing means any section
+    pinned_sections: dict[str, list[str]] = {}
+    # courses already taken or in progress (and their equivalents), from a degree audit; never planned again
+    completed_courses: list[str] = []
+    # Core area code -> how many courses it still needs (6 hours of government is two); default 1
+    core_slots: dict[str, int] = {}
+    groups: list[RequirementGroup] = []  # choose_from and elective groups
+    # Off by default: nothing is added that you did not pick. When on, a shortfall against your credit minimum is
+    # filled with the easiest-ranked courses (limited to elective_depts if set), each labelled as filler.
+    fill_electives: bool = False
+    elective_depts: list[str] = []  # limit electives to these departments; empty = any
+    registration_time: str | None = None  # typed in by the user; never read from an account
+
+    @model_validator(mode="after")
+    def _drop_completed(self):
+        norm = [" ".join(c.upper().split()) for c in self.completed_courses]
+        self.completed_courses = list(dict.fromkeys(norm))
+        done = set(self.completed_courses)
+        self.required_courses = [c for c in self.required_courses if " ".join(c.upper().split()) not in done]
+        self.preferred_courses = [
+            c for c in self.preferred_courses if " ".join(c.upper().split()) not in done
+        ]
+        return self
+
+
+def _ensure(con: sqlite3.Connection) -> None:
+    con.execute("CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+
+
+def _norm(c: str) -> str:
+    return " ".join(c.upper().split())
+
+
+def normalize(req: Requirements, cat: Catalog | None = None) -> Requirements:
+    """One set of rules that keeps saved requirements consistent, so nothing you removed lingers invisibly:
+    no duplicates; a course is required or like-to-take, never both; only either/or groups are kept, each with
+    real, untaken, not-already-required courses and a sensible pick count; Core slot counts and pinned sections
+    exist only for things that are still on your lists."""
+    r = req.model_copy(deep=True)
+    r.required_courses = list(dict.fromkeys(_norm(c) for c in r.required_courses if c.strip()))
+    r.core_areas = list(dict.fromkeys(r.core_areas))
+    r.preferred_courses = [
+        c
+        for c in dict.fromkeys(c if c.startswith("core:") else _norm(c) for c in r.preferred_courses)
+        if c not in r.required_courses and c not in {f"core:{a}" for a in r.core_areas}
+    ]
+    done = set(r.completed_courses)
+    groups: list[RequirementGroup] = []
+    seen: set[tuple] = set()
+    for g in r.groups:
+        if g.kind != "choose_from":
+            continue
+        resolved = list(
+            dict.fromkeys((resolve_code(c, cat) if cat is not None else None) or _norm(c) for c in g.courses)
+        )
+        # a choice already met by something required or taken needs nothing more
+        need = min(g.pick, len(resolved)) - sum(1 for c in resolved if c in r.required_courses or c in done)
+        codes = [c for c in resolved if c not in done and c not in r.required_courses]
+        if need <= 0 or not codes:
+            continue
+        pick = min(need, len(codes))
+        key = (tuple(sorted(codes)), pick)
+        if key in seen:
+            continue
+        seen.add(key)
+        groups.append(g.model_copy(update={"courses": codes, "pick": pick}))
+    r.groups = groups
+    wish_areas = {c[5:] for c in r.preferred_courses if c.startswith("core:")}
+    r.core_slots = {a: n for a, n in r.core_slots.items() if a in r.core_areas or a in wish_areas}
+    listed = set(r.required_courses) | {c for c in r.preferred_courses if not c.startswith("core:")}
+    listed |= {c for g in r.groups for c in g.courses}
+    r.pinned_sections = {c: u for c, u in r.pinned_sections.items() if c in listed and u}
+    return r
+
+
+def load(con: sqlite3.Connection) -> Requirements:
+    _ensure(con)
+    row = con.execute("SELECT value FROM kv WHERE key='requirements'").fetchone()
+    return normalize(Requirements.model_validate_json(row[0])) if row else Requirements()
+
+
+def save(con: sqlite3.Connection, req: Requirements, cat: Catalog | None = None) -> Requirements:
+    """Stores the requirements after normalizing them, and returns what was actually stored."""
+    _ensure(con)
+    req = normalize(req, cat)
+    with con:
+        con.execute("INSERT OR REPLACE INTO kv VALUES('requirements', ?)", (req.model_dump_json(),))
+    return req
+
+
+def resolve_code(text: str, cat: Catalog) -> str | None:
+    """'cs 312', 'C S312', 'CS 312' -> 'C S 312' when that course exists in the catalog."""
+    m = re.match(r"^\s*([A-Za-z][A-Za-z ]{0,3}?)\s*(\d\w{0,4})\s*$", text)
+    if not m:
+        return None
+    dept_in, num = m.group(1).replace(" ", "").upper(), m.group(2).upper()
+    for code in cat.by_code:
+        d, _, n = code.rpartition(" ")
+        if d.replace(" ", "") == dept_in and n == num:
+            return code
+    return None
+
+
+# --- degree audit text (pasted by the user) ---------------------------------------------------------
+
+_DROP = re.compile(
+    r"(eid|student\s*(id|name)|name:|@|\b\d{3}[-.\s]\d{3,4}[-.\s]\d{4}\b|address|date of birth|dob|ssn|\b\d{7,10}\b)",
+    re.IGNORECASE,
+)
+_KEEP = re.compile(
+    r"(\b[A-Z]{1,3}\s?\d{3}[A-Z]?\b|core|require|remain|need|not satisf|elective|hours|credit|flag|"
+    r"choose|select|complete|in progress|signature|communication|mathematics|science|history|government|humanities|arts|behavioral)",
+    re.IGNORECASE,
+)
+MAX_AUDIT_CHARS = 60_000
+
+
+def minimize_audit(text: str) -> str:
+    """Local redaction before anything is sent: drop lines that look like identity details and keep
+    only lines about requirements or courses."""
+    kept = [
+        ln.strip() for ln in text.splitlines() if ln.strip() and _KEEP.search(ln) and not _DROP.search(ln)
+    ]
+    return "\n".join(kept)[:MAX_AUDIT_CHARS]
+
+
+AUDIT_SYSTEM = f"""You read the text of a UT Austin degree audit and list what the student STILL NEEDS.
+- Output groups. kind=core_area for a remaining Core curriculum area (core_code from this list only: \
+{", ".join(f"{a.code}={a.name}" for a in CORE_AREAS)}); kind=required_course for a specific course still \
+required; kind=choose_from when the audit says to pick N from a list; kind=elective for open elective \
+hours (credit_hours_needed).
+- Skip anything already satisfied or in progress. Do not invent courses. Use UT course format such as \
+"C S 312" and "M 408C".
+- Put anything that does not fit in notes."""
+
+
+def parse_audit(text: str, client=None) -> tuple[AuditParse, int]:
+    """Returns (proposed groups, characters sent). The caller shows them for correction."""
+    small = minimize_audit(text)
+    if not small:
+        raise ValueError("No requirement lines found in that text. Paste the audit's requirements section.")
+    client = client or llm.get_client("audit")
+    return llm.structured(client, AuditParse, AUDIT_SYSTEM, small, max_tokens=6000, task="audit"), len(small)
+
+
+def apply_groups(
+    req: Requirements, groups: list[RequirementGroup], cat: Catalog
+) -> tuple[Requirements, list[str]]:
+    """Merge confirmed groups into saved requirements; returns (requirements, warnings)."""
+    r = req.model_copy(deep=True)
+    warn: list[str] = []
+    valid_core = {a.code for a in CORE_AREAS}
+    for g in groups:
+        if g.kind == "core_area":
+            if g.core_code in valid_core and g.core_code not in r.core_areas:
+                r.core_areas.append(g.core_code)
+            elif g.core_code not in valid_core:
+                warn.append(f"{g.name}: unknown Core code {g.core_code!r}")
+        elif g.kind == "required_course":
+            for c in g.courses:
+                code = resolve_code(c, cat)
+                if code is None:
+                    warn.append(f"{c}: not in the Spring 2027 schedule, left out")
+                elif code not in r.required_courses:
+                    r.required_courses.append(code)
+        else:
+            codes = [resolve_code(c, cat) for c in g.courses]
+            for c, rc in zip(g.courses, codes, strict=True):
+                if rc is None:
+                    warn.append(f"{c}: not in the Spring 2027 schedule, left out")
+            if g.kind == "choose_from":
+                r.groups.append(g.model_copy(update={"courses": [c for c in codes if c]}))
+    return normalize(r, cat), warn
+
+
+def dump(req: Requirements) -> str:
+    return json.dumps(req.model_dump())

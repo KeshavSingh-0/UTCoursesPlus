@@ -7,10 +7,21 @@ authors = [
     { name = "Keshav Singh", email = "keshavussingh@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "anthropic>=1.12.1",
+    "fastapi>=0.142.4",
+    "httpx>=0.28.1",
+    "playwright>=1.63.0",
+    "pydantic>=2.13.5",
+    "pypdf>=6.19.0",
+    "python-multipart>=0.0.32",
+    "reportlab>=5.1.0",
+    "selectolax>=1.0.0",
+    "uvicorn[standard]>=0.54.0",
+]
 
 [project.scripts]
-utcoursesplus = "utcoursesplus:main"
+utcoursesplus = "utcoursesplus.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]
@@ -18,6 +29,14 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.168.5",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+# Pydantic models use literal list defaults, which pydantic copies per instance.
+ignore = ["RUF012", "UP046", "UP047"]

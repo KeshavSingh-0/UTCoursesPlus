@@ -1,0 +1,18 @@
+# local data, session state, secrets
+data/
+backend/data/
+.env
+.env.*
+*.sqlite
+*.sqlite3
+# the shared class database (schedule facts only) is the one database that is committed
+!seed/
+!seed/spring2027.sqlite
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+.DS_Store
+.hypothesis/

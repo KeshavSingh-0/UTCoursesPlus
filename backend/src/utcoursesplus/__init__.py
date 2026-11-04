@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from utcoursesplus!")
+"""UT Courses Plus: Spring 2027 course database, ratings, syllabus signals, schedule ranking."""

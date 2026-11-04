@@ -1,0 +1,889 @@
+{
+  "about": "Every change to this repo, newest last. Fields: id, date, commit_message, summary, files, changes (what and how), bugs_fixed (symptom, cause, fix), notes.",
+  "entries": [
+    {
+      "id": 1,
+      "date": "2026-10-08",
+      "commit_message": "feat: stage 1 course database (parser, SQLite, throttled cached fetcher, manual-login session, importers, quality report)",
+      "summary": "Stage 1: parse the Spring 2027 registrar schedule into a local SQLite database, with Core curriculum tags.",
+      "files": [
+        "backend/src/utcoursesplus/{config,models,timeutil,parse,db,fetch,session,crawl,importers,quality,cli}.py",
+        "backend/tests/{test_timeutil,test_parse_db,test_fetch}.py",
+        "backend/tests/fixtures/results_sample.html",
+        "backend/pyproject.toml",
+        ".gitignore",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Parser for registrar results pages",
+          "how": "selectolax (lexbor) reads table.results; rows are matched by their data-th header text, course headers (td.course_header h2) are split into dept, number and title with a regex, and each section is validated by a strict Pydantic Section model. Per-row failures are recorded, not fatal."
+        },
+        {
+          "what": "Day/time parsing",
+          "how": "timeutil.parse_days uses a TH|M|T|W|F|S|U regex and rejects leftovers; parse_time_range converts 'a.m./p.m.' ranges to minutes from midnight and rejects end <= start."
+        },
+        {
+          "what": "SQLite schema and upsert",
+          "how": "db.py creates course, section, meeting, instructor, section_instructor, section_tag, core_area, crawl_log, parse_failure and requirement_group tables. Upsert replaces scalar fields and meetings but unions tags and instructors, and keeps an existing level when a new source lacks one."
+        },
+        {
+          "what": "Throttled, cached, read-only fetcher",
+          "how": "fetch.Fetcher caches by sha256 of the URL under data/cache, waits at least 3 seconds between live requests, backs off exponentially on network errors and 5xx, and raises BlockedError on 403, 429 or CAPTCHA text and SessionExpired on a redirect to the UT login."
+        },
+        {
+          "what": "Manual login and session clearing",
+          "how": "session.login opens a headed Playwright Chromium, waits for the schedule search page, then saves cookies only (storage_state, mode 600) to data/session/. clear-session deletes that folder. The code never reads credentials."
+        },
+        {
+          "what": "Crawl plan",
+          "how": "crawl.plan builds 10 Core-area searches plus every field of study x L/U/G from the home-page select (229 fields), following next_unique pagination links."
+        },
+        {
+          "what": "Offline importers and quality report",
+          "how": "import-html parses pages saved from the browser; import-json validates a list of Sections; quality.report prints counts, parse failures, missing times and tag coverage."
+        },
+        {
+          "what": "Tests",
+          "how": "23 pytest tests covering time parsing (plus a Hypothesis round trip), parsing, DB upserts, the JSON importer rejecting malformed input, crawl planning and the fetcher's cache, throttle, block and session-expiry behavior."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "ImportError: Modest backend is deprecated",
+          "cause": "selectolax 1.x removed selectolax.parser",
+          "fix": "import LexborHTMLParser and LexborNode from selectolax.lexbor"
+        },
+        {
+          "symptom": "samples command printed every start time as 0",
+          "cause": "In SQLite '||' binds tighter than '/', so start_min/60||':' was evaluated wrongly",
+          "fix": "format times with printf('%d:%02d-%d:%02d', ...)"
+        },
+        {
+          "symptom": "A homepage test expected more than 250 departments",
+          "cause": "The guess was wrong; the saved page has 229 fields of study",
+          "fix": "assert exactly 229"
+        },
+        {
+          "symptom": "ruff TRY203 and BLE001 failures, and a blind-exception test",
+          "cause": "A pointless re-raise, blanket 'except Exception' in the parser and in session.login, and pytest.raises(Exception)",
+          "fix": "removed the re-raise, caught ValueError/KeyError in the parser and PlaywrightError in login, used pydantic ValidationError in tests"
+        },
+        {
+          "symptom": "__pycache__ .pyc files were tracked in git",
+          "cause": "Committed in the earlier scaffold before .gitignore existed",
+          "fix": "git rm --cached and added __pycache__ to .gitignore"
+        }
+      ],
+      "notes": [
+        "The registrar schedule requires UT login; UT's acceptable-use policy (sections 5.7, 5.10) does not clearly permit scripted access. The user chose the automated crawl and accepts the account risk.",
+        "Verified against one real saved page only (Core area 090, 40 sections, 0 parse failures). Department result pages and non-core flags are unverified until the first real crawl."
+      ]
+    },
+    {
+      "id": 2,
+      "date": "2026-10-08",
+      "commit_message": "fix: login command hung after manual login",
+      "summary": "The login command never saved the session after the user logged in, so the terminal stayed blocked.",
+      "files": [
+        "backend/src/utcoursesplus/session.py",
+        "backend/tests/test_session.py"
+      ],
+      "changes": [
+        {
+          "what": "Login detection based on URL and page title",
+          "how": "is_schedule_page() returns true when the host is utdirect.utexas.edu, the path contains /course_schedule/, and the title contains 'Course Search', 'Search Results' or 'Course Schedule'. It is unit tested against schedule, login and unrelated URLs."
+        },
+        {
+          "what": "Enter-key fallback",
+          "how": "The poll loop checks stdin with select(); pressing Enter saves the session if the browser is on the utdirect host, and prints a message if it is still on the login host."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "After logging in, 'uv run utcoursesplus login' kept waiting and the terminal could not be used for the next command",
+          "cause": "The old check required the text 'Search for' within the first 400 characters of the page body, and the page title does not contain it, so the check never became true",
+          "fix": "Replaced it with the URL and title check above, plus the Enter fallback. Ctrl+C on the old version discards the login, so re-run login with the new code."
+        }
+      ],
+      "notes": [
+        "Playwright cannot be run in this cloud container, so the new loop is covered by unit tests of the detection function only, not an end-to-end browser run."
+      ]
+    },
+    {
+      "id": 3,
+      "date": "2026-10-08",
+      "commit_message": "fix: keep unrecognized Core tags visible; add reparse and diagnose commands",
+      "summary": "The first real crawl (C S + Mathematics core) showed 237 sections with a Core tag but only 102 mapped to a named Core area, no flags at all, 37 sections without times and 68 without instructors. Added tools to rebuild from cached pages and to dump the raw rows behind the anomalies.",
+      "files": [
+        "backend/src/utcoursesplus/{models,parse,db,quality,rebuild,cli}.py",
+        "backend/tests/test_parse_db.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Tag classification",
+          "how": "Labels are matched to the 10 Core areas after normalizing case, punctuation and '&' vs 'and'. A tag whose tooltip says 'core curriculum requirement' but is not one of the 10 is stored as kind=core, code='unmapped'. Everything else is a flag. The tooltip text is now stored in section_tag.title."
+        },
+        {
+          "what": "Continuation rows (unverified layout)",
+          "how": "A table row with no unique number but with days, hours or instructors is attached to the section above it as an extra meeting or instructor. This guards against multi-meeting sections being truncated; it is based on an assumption and will be confirmed or removed from the diagnose output."
+        },
+        {
+          "what": "reparse command",
+          "how": "rebuild.reparse_cache deletes sections that came from the authenticated crawl and re-parses every page in data/cache, using the URL's level and core_code. It makes no network requests."
+        },
+        {
+          "what": "diagnose command",
+          "how": "rebuild.diagnose writes up to 3 raw HTML rows each for sections with no times, no instructors, rows with no unique number, and each unusual tag label to data/diagnose.txt."
+        },
+        {
+          "what": "Quality report",
+          "how": "Added missing_times_by_mode, no_instructor_by_status, unmapped_core_labels and flag_titles; removed the old flags counter."
+        },
+        {
+          "what": "Schema migration",
+          "how": "connect() drops and recreates section_tag when it lacks the title column; the table is derived data and reparse restores it."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "sections_with_core_tag was 237 but the named Core areas totalled 102, and flags was empty",
+          "cause": "Any tag with 'core curriculum requirement' in its tooltip and a label that did not exactly match my area names was stored as a core tag under its CSS class, so it was counted nowhere and hidden",
+          "fix": "Unrecognized core-titled tags are stored as code 'unmapped' and listed by label in the quality report; label matching is now normalized"
+        }
+      ],
+      "notes": [
+        "Cause of the 37 sections without times and 68 without instructors is not yet known. They may be asynchronous online sections, staff-taught sections, or multi-row sections. Run diagnose and send data/diagnose.txt to confirm.",
+        "28 tests pass. Not run against the user's cached pages, which live only on their machine."
+      ]
+    },
+    {
+      "id": 4,
+      "date": "2026-10-08",
+      "commit_message": "refactor: drop unneeded continuation-row parsing; report empty pages",
+      "summary": "Real crawl output showed no multi-row sections, so the speculative continuation-row code is removed. Anomalies from the first crawl were explained by the data, not the parser.",
+      "files": [
+        "backend/src/utcoursesplus/{parse,quality}.py",
+        "backend/tests/test_parse_db.py"
+      ],
+      "changes": [
+        {
+          "what": "Removed _attach_continuation",
+          "how": "diagnose found 0 rows without a unique number in 292 sections, so the assumption was unsupported; the test for it was replaced with one built from the real markup."
+        },
+        {
+          "what": "Quality report",
+          "how": "Added empty_page_urls and by_mode."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Earlier report showed 237 sections with Core tags vs 102 in named areas",
+          "cause": "The registrar emits empty placeholder <li class=\"\" title=\" core curriculum requirement\"></li> on sections with no Core area; the first parser counted them as core tags",
+          "fix": "Entries with an empty label are skipped (done in 6b6bb14); verified: sections_with_core_tag is now 102 and unmapped_core_labels is empty. A test using the real markup now covers it."
+        }
+      ],
+      "notes": [
+        "37 sections without times are real: 24 Internet sections and 13 face-to-face research/reading courses with no meeting time. 68 sections have an empty instructor cell (staff/TBA). The schedule generator in Stage 5 must handle sections with no meeting time and no instructor.",
+        "No non-Core flags (writing, ethics, global cultures, etc.) appear in the C S results, so they may only exist on each section's detail page. A saved detail page is needed to confirm."
+      ]
+    },
+    {
+      "commit_message": "feat: preferences, language-model tuning, ratings and grades import, shrinkage estimates",
+      "summary": "Stages 3 and 5 foundations: PreferenceConfig with validation and undo history, natural-language tuning that only edits the config, optional signal imports, and empirical-Bayes difficulty estimates with intervals.",
+      "files": [
+        "backend/src/utcoursesplus/{prefs,llm,nlpref,signals}.py",
+        "backend/tests/{test_prefs,test_signals}.py",
+        "backend/pyproject.toml",
+        "tools/changelog.py"
+      ],
+      "changes": [
+        {
+          "what": "PreferenceConfig",
+          "how": "Pydantic models with extra='forbid'. Hard constraints (times, days off, gaps, walking, credit range, exclusions, required courses) and eight soft weights that are renormalized to sum to 1 by a model validator; all-zero weights fall back to defaults. History is a table whose newest row is current; undo deletes it."
+        },
+        {
+          "what": "Natural-language tuning",
+          "how": "nlpref.propose sends the request plus the current config to the model through client.messages.parse with a Pydantic output schema. required_courses is removed from what the model sees and cannot be returned (HardCore vs HardConstraints). Python then validates, computes the real diff and attaches the user's phrase and the model's rationale per changed path. A clarifying question or tradeoff note is passed through instead of silently picking. Nothing is applied until the API's apply call."
+        },
+        {
+          "what": "Ratings and grades import",
+          "how": "CSV importers validate every row and report rejected lines. Ratings are never scraped: RateMyProfessors' terms (section 6) prohibit automated access, so only CSV import and a link-out are supported. Grade imports store a source name and licence note per file."
+        },
+        {
+          "what": "Shrinkage estimates",
+          "how": "signals.py works on a z scale: each source adds precision n*tau^2/sigma^2, posterior mean is the precision-weighted z shrunk toward the department prior, and the interval is +/-1.96 sd mapped through the normal CDF to a 0-1 ease. Missing sources are dropped and the blend weights renormalized; rank values subtract half the interval width so low-confidence courses rank lower while staying visible."
+        },
+        {
+          "what": "Linter config",
+          "how": "pyproject sets line length 110 and ignores RUF012/UP046/UP047, which flag Pydantic's literal defaults and generic helper signatures."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "A test expected 3 ratings of difficulty 4.5 to stay above 0.2 ease",
+          "cause": "The test assumed far-from-prior ratings are discounted more than they are; with a department prior near 2.0 the evidence really is strong",
+          "fix": "Rewrote the test to compare the same rating at n=3 and n=300: the small sample must be pulled toward the prior and have a much wider interval"
+        },
+        {
+          "symptom": "Rank values could go negative",
+          "cause": "mean minus half-width is unbounded below",
+          "fix": "Clip rank values to [0, 1]"
+        },
+        {
+          "symptom": "Ambiguity guard in professor matching was always true",
+          "cause": "Compared the set of distinct instructors with a list built from the same distinct keys",
+          "fix": "Match only keys that map to exactly one imported person; two people sharing last name and first initial are skipped"
+        }
+      ],
+      "notes": [
+        "The model identifier defaults to claude-opus-5-5 and can be changed with the UTCP_MODEL environment variable. Refusals are reported as an error; server-side fallbacks are not enabled.",
+        "The spread constants (GPA_TAU, RMP_*_TAU and so on) are judgment values documented in signals.py, not fitted to UT data.",
+        "UT's official grade dashboard is at reports.utexas.edu/spotlight-data/ut-course-grade-distributions; licensing for reuse of exported data is not stated there, so the importer records a licence note per file."
+      ],
+      "id": 5,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: syllabus extraction, schedule generator, API and CLI commands",
+      "summary": "Stage 4 and the engine of Stage 5: quote-verified syllabus extraction with a documented lightness score and gold-set tools; requirements and Core tree; conflict-free schedule search with explanations, backups and a registration checklist; FastAPI service and CLI commands.",
+      "files": [
+        "backend/src/utcoursesplus/{syllabus,catalog,buildings,requirements,schedule,api,fetch,cli,db}.py",
+        "backend/tests/{test_syllabus,test_schedule,test_api,helpers}.py"
+      ],
+      "changes": [
+        {
+          "what": "Syllabus extraction",
+          "how": "The model fills a strict Pydantic schema (client.messages.parse). verify_quotes then nulls every value whose quote is not found, case and whitespace insensitive, in the syllabus text, so unsupported guesses never reach the score. Only public URLs are fetched: robots.txt is checked, login-gated hosts are refused, PDFs are read locally with pypdf."
+        },
+        {
+          "what": "Lightness score",
+          "how": "Nine components with fixed weights (exam count 0.20, exam weight 0.20, weekly hours 0.15, final 0.10, attendance 0.10, projects 0.10, participation 0.05, late policy 0.05, group work 0.05). Missing components are dropped and the rest renormalized; coverage is stored and shown. Every component's rule is a string returned to the UI."
+        },
+        {
+          "what": "Gold set",
+          "how": "gold-sheet writes a CSV of stored syllabi to fill by hand; gold-eval reports per-field labeled count, accuracy, false values and misses (numeric tolerance 5 points for weights, 1 hour for hours)."
+        },
+        {
+          "what": "Schedule generator",
+          "how": "Backtracking over slots (required courses, choose-from groups, Core areas, then electives to reach the credit minimum), most constrained slot first, pairwise overlap checks, credit ceiling, and branch-and-bound on an optimistic utility. A node budget returns best-found results and flags truncation. Candidate sections per slot are capped at the best 14 by section-level utility."
+        },
+        {
+          "what": "Utility",
+          "how": "Weighted mean of eight features in [0,1]; walking is dropped when data/buildings.csv is absent and the rest renormalized. Rank values for ease, lightness and quality subtract half the interval width, so low-confidence courses rank lower while remaining visible."
+        },
+        {
+          "what": "Explanations, backups, registration",
+          "how": "explain_vs lists the features with the largest weighted difference plus the sections that differ. backups picks alternates minimizing overlap with the top pick and each other. registration_plan scores scarcity from status, reserved seats, open alternatives and required status and attaches a fallback section; it is labeled a heuristic, and the registration time is typed in by the user."
+        },
+        {
+          "what": "API and CLI",
+          "how": "FastAPI app with endpoints for status, sources, requirements, audit parsing (shown for correction, never stored), Core tree, courses, preferences with propose/apply/undo, schedule generation, suggestions and imports. New CLI commands: serve, import-ratings, import-grades, add-syllabus, gold-sheet, gold-eval."
+        },
+        {
+          "what": "Fetcher",
+          "how": "Split into _request (throttle, backoff, block detection), get (text) and get_bytes (PDF) sharing the same safeguards."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "NameError: timezone not defined in fetch.py after refactor",
+          "cause": "ruff had rewritten timezone.utc to datetime.UTC and the new code still used timezone",
+          "fix": "use UTC"
+        },
+        {
+          "symptom": "Test for excluded section failed validation",
+          "cause": "The config validator correctly requires 5-digit unique numbers; the test used '9'",
+          "fix": "use '00009'"
+        },
+        {
+          "symptom": "A ratings CSV row 'Smith John' did not match 'SMITH, JOHN'",
+          "cause": "Without a comma the name is read as 'First Last'; 'Smith John' is ambiguous by construction",
+          "fix": "documented the accepted formats ('Last, First' or 'First Last') and fixed the test data"
+        }
+      ],
+      "notes": [
+        "Courses with a linked lab or discussion appear in the registrar schedule as separate rows; the generator does not know co-requisites and treats each as an independent course.",
+        "One course satisfies at most one Core slot in a schedule, even if it carries several Core tags.",
+        "The model call for syllabus, audit and preference parsing uses client.messages.parse; refusals and SDK errors are returned as plain-language API errors."
+      ],
+      "id": 6,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: web interface, schedule list de-duplication, clearer credit-limit message",
+      "summary": "Stage 6: Vite + React + TypeScript interface with six screens, a hand-built weekly calendar, virtualized course table and a restrained design system; fixes found while running it against a synthetic database.",
+      "files": [
+        "frontend/**",
+        "backend/src/utcoursesplus/{schedule,config}.py",
+        "backend/tests/{test_schedule,demo_db}.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Screens",
+          "how": "Requirements (Core area checkboxes, required courses, per-area course options sorted easiest first, audit paste with review table), Courses and sections (virtualized with @tanstack/react-virtual, arrow-key navigation, detail panel with RMP link-out and source), Preferences (sliders, hard constraints, plain-English box with diff, phrases, reasons, apply and undo), Ranked schedules (calendar, why-this-ranks, score components, backups), Registration plan (hand-run checklist), Data sources (origins, missing signals, importers, syllabus form)."
+        },
+        {
+          "what": "Design system",
+          "how": "CSS variable tokens: one primary (deep blue), one accent (burnt orange), warm neutrals, light theme only, 2px radius, no gradients or shadows, IBM Plex Sans and Mono, a 12-24px type scale. scripts/contrast.mjs checks 16 token pairs against WCAG AA and the ratios are documented in styles.css. One icon library (lucide-react). Status is plain text with colour as reinforcement; uncertainty is shown as ranges and confidence words."
+        },
+        {
+          "what": "Accessibility",
+          "how": "Skip link, visible focus ring, semantic table roles on the virtualized grid with aria-activedescendant, labels on every control, aria-live on result counts, responsive layout verified at 390px and 1440px."
+        },
+        {
+          "what": "Ranked list",
+          "how": "generate now returns one schedule per distinct set of courses (best section choice); section-level alternatives stay in the pool and feed the backup schedules."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "With requirements totalling 19 credit hours and a 18-hour maximum, the app said only that no combination fits",
+          "cause": "The search pruned at the root and the generic message did not name the credit limit",
+          "fix": "generate computes the minimum possible credit total first and reports 'Your requirements need at least N credit hours ... but your maximum is M'"
+        },
+        {
+          "symptom": "The top eight schedules differed by a single section of the same courses",
+          "cause": "The ranked list was the raw top of the pool",
+          "fix": "De-duplicate by course set for the ranked list; keep the pool for backups"
+        },
+        {
+          "symptom": "Phone layout scrolled sideways on every screen (about 500 px overflow)",
+          "cause": "The one-column grid used 1fr, which lets wide tables stretch it",
+          "fix": "minmax(0, 1fr) and min-width: 0 on main"
+        },
+        {
+          "symptom": "Calendar hour labels wrapped in the compact view and the first label touched the header",
+          "cause": "Labels were absolutely positioned at the edge and included a.m./p.m.",
+          "fix": "Compact labels drop the suffix; the first label is nudged down"
+        },
+        {
+          "symptom": "'1 courses offered'",
+          "cause": "No plural handling",
+          "fix": "Singular and plural text"
+        },
+        {
+          "symptom": "Courses table needed sideways scrolling to see ease and difficulty at 1440 px",
+          "cause": "Eleven columns summed past the content width",
+          "fix": "Removed the room column (room is in the detail panel and calendar) and narrowed the rest"
+        }
+      ],
+      "notes": [
+        "The interface was exercised only against a synthetic database (backend/tests/demo_db.py) with headless Chromium: all six screens loaded at 1440 and 390 px with no console errors, failed requests or horizontal overflow. It has not been run against your crawled data.",
+        "Not exercised live: the language-model features (no API key in the build environment) and the Playwright login window (needs a display). The model calls are covered by tests with a stand-in client.",
+        "Keyboard navigation inside the courses grid and the Enter-to-save login fallback were written but not checked by hand."
+      ],
+      "id": 7,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "fix: explain a missing front-end build instead of returning 404; clarify setup commands",
+      "summary": "A first local run showed the server returning 404 at / because the front end had not been built: the setup command joined npm install and npm run build with a single & so they ran in parallel and the build failed with 'tsc: command not found'.",
+      "files": [
+        "backend/src/utcoursesplus/api.py",
+        "backend/tests/test_api.py",
+        "README.md",
+        "backend/tests/test_api.py"
+      ],
+      "changes": [
+        {
+          "what": "Root page when the front end is not built",
+          "how": "api.create_app registers GET / returning plain-text instructions (cd frontend, npm install && npm run build) when frontend/dist does not exist; covered by a test."
+        },
+        {
+          "what": "README commands",
+          "how": "Setup steps are listed one per line with a note not to join them with a single &; trailing # comments were removed from command lines because zsh passes them to the program as arguments."
+        },
+        {
+          "what": "Injectable front-end folder",
+          "how": "create_app takes dist_dir so tests choose whether a built front end exists; added a test that a built front end is served at / and at client-side routes."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "'tsc: command not found' during npm run build, then 404 for / and /favicon.ico from the server",
+          "cause": "The earlier instruction was run as 'npm install & npm run build'; a single & backgrounds the first command, so the build ran before dependencies existed, and no frontend/dist was produced",
+          "fix": "Use && (sequential). The server now says what to do instead of a bare 404."
+        },
+        {
+          "symptom": "'unrecognized arguments: # open http://127.0.0.1:8000' when running the serve command",
+          "cause": "zsh does not treat # as a comment in interactive shells, and the README line had a trailing comment",
+          "fix": "Removed trailing comments from README command lines"
+        },
+        {
+          "symptom": "test_root_explains_missing_frontend_build failed on a machine that had built the front end (found after the previous push)",
+          "cause": "The test depended on whether frontend/dist existed on the machine running it",
+          "fix": "Pass a nonexistent dist_dir in the test. The earlier push went out with this one test failing because my command chain ignored pytest's result."
+        }
+      ],
+      "notes": [
+        "The user pasted an API key into the chat. It should be revoked and replaced; it was not written to any file or committed."
+      ],
+      "id": 8,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: like-to-take ranking, registration options, course-site syllabus pipeline; fix search pruning bound",
+      "summary": "Backend for three requests: (1) a ranked Like to Take list beside Required courses, (2) per-course ordered options for a keyboard registration runner, (3) reading UT's syllabus site for only the selected courses, with recent and same-instructor syllabi preferred.",
+      "files": [
+        "backend/src/utcoursesplus/{prefs,requirements,nlpref,schedule,signals,coursedocs,syllabus,fetch,db,api}.py",
+        "backend/tests/{test_schedule,test_signals,test_prefs,test_coursedocs,test_api,helpers}.py"
+      ],
+      "changes": [
+        {
+          "what": "Like to Take list",
+          "how": "Requirements.preferred_courses is an ordered list (position is the student's ranking). Each becomes an optional slot in the search; a new soft weight 'wishlist' (default 16%, renormalized with the rest) rewards the share of rank-weighted preferred courses a schedule includes (rank weight n for the best down to 1). A course is never both required and preferred. Courses with no eligible section are reported in notes instead of failing the search."
+        },
+        {
+          "what": "Optional slots and symmetry",
+          "how": "Preferred courses and electives may stay empty; the leaf check enforces the credit minimum. Interchangeable slots (electives, pick-N groups) take candidates in a fixed order so the same set is not generated in every permutation (choosing 2 of 5 electives now visits each pair once)."
+        },
+        {
+          "what": "Registration options",
+          "how": "Each registration step now carries up to ten ordered options for its course (the planned section first, then the others sorted by conflicts with the rest of the plan, then seat status), each with its meeting times and the course codes it would clash with, so the interface can re-check conflicts as sections are confirmed."
+        },
+        {
+          "what": "Syllabus site pipeline",
+          "how": "coursedocs.py searches utdirect.utexas.edu/apps/student/coursedocs once per selected course using the logged-in session, parses the results table, and recommends up to three syllabi: each current instructor's newest, then the newest recent ones (2022 on, honors sections excluded). Nothing is downloaded until the student ticks documents; then each file is downloaded, turned into text locally (PDF, Word .docx or HTML), and read with the quote-verified extraction. Jobs run one at a time on a background thread with their own database connection."
+        },
+        {
+          "what": "Averaging syllabi",
+          "how": "SignalIndex now averages an instructor's two newest syllabi, or up to three course-level ones when that instructor has none, and marks course-level evidence as slightly less certain."
+        },
+        {
+          "what": "Database",
+          "how": "WAL journal mode and a 15 second busy timeout so a background job can write while the app reads."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Branch-and-bound could discard schedules that belonged in the top results once the result pool was full",
+          "cause": "The optimistic bound multiplied the section term by the section weight share a second time, making it too low",
+          "fix": "Removed the extra factor; bound for optional slots uses the better of the current mean and the best remaining section. The earlier regression test passed even with the bug, so I replaced it with a property test (random catalogs, small pool against exhaustive search) and confirmed it fails with the bug restored."
+        }
+      ],
+      "notes": [
+        "The syllabus site is behind the same UT login as the schedule. UT's acceptable-use policy (sections 5.7 and 5.10) does not clearly permit scripted access there either, and the original instruction was to avoid login-gated syllabi unless the terms clearly allow it. The student chose to proceed; the design limits requests to selected courses (one search per course plus one download per ticked syllabus), throttled at 3 seconds, cached, read-only, and files are never shared.",
+        "The search form's parameter names were read from a saved page; the live request has not been run yet. Syllabi hosted on Simple Syllabus (outside links) are listed but not read.",
+        "Word .doc (old format) files cannot be read; they are reported and skipped."
+      ],
+      "id": 9,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: like-to-take ranking, keyboard registration runner with case tree, syllabus screen",
+      "summary": "Interface for three requests: a ranked Like to Take list next to Required courses; a keyboard registration runner (Space to confirm, arrows to move between fallback sections, copy to clipboard) with a visual tree of every case; and a Syllabi screen that reads UT's syllabus site for a chosen subset of courses and scores difficulty.",
+      "files": [
+        "frontend/src/{Requirements,Registration,Syllabi,Courses,Schedules,Sources,App,api}.tsx/.ts",
+        "frontend/src/{runner.ts,runner.test.ts,styles.css}",
+        "frontend/{package.json,tsconfig.json}",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Required and Like to take lists",
+          "how": "Two lists on the Requirements screen. The Like to take list is ranked by drag and drop (HTML5 drag events) with move up and move down buttons as the keyboard alternative; each item can be moved between the lists or removed. The Courses detail panel has Make required and Add to Like to take. The Ranked schedules screen reports which preferred courses a schedule includes and which were left out."
+        },
+        {
+          "what": "Registration runner",
+          "how": "runner.ts holds the logic as pure functions (confirm, skip, undo, option cycling that skips sections overlapping ones already registered, warnings for overlaps with other planned sections), tested with node:test (six tests). The screen listens for Space, arrows, C, X and Backspace when focus is not in a form field or on a button, copies the unique number with navigator.clipboard (with a textarea fallback), and saves progress per plan in localStorage."
+        },
+        {
+          "what": "Every-case tree",
+          "how": "Each course is a row: the planned section, then 'if full' arrows to the next-best sections that still fit the plan, ending in 'none left'; a final row shows the backup schedules and which sections they share with the plan. Boxes are buttons that jump the runner to that option. Drawn with plain CSS borders; no colour is used except for status text."
+        },
+        {
+          "what": "Syllabi screen",
+          "how": "Step 1 lists required and like-to-take courses (plus any code you add) with checkboxes; Find syllabi runs a background job whose log is polled once a second. Step 2 lists what exists per course with the recommended ones ticked; Read runs a second job. Step 3 shows difficulty (1 minus lightness) per course and, expandable, each syllabus's coverage and the per-component rules. Messages say what to do when there is no saved login or no API key."
+        }
+      ],
+      "bugs_fixed": [],
+      "notes": [
+        "Checked in headless Chromium against the synthetic demo database: dragging re-ranked the list on the server, the runner keys cycled options and advanced courses, the clipboard held the expected unique number after each step, undo restored the course, and the Syllabi flow worked with the syllabus endpoints stubbed. No console errors or failed requests.",
+        "Not exercised: a real search or download against UT's syllabus site (needs your login), and the model calls.",
+        "Courses with a linked lab or discussion are separate rows in the registrar schedule, so the runner treats each as its own course."
+      ],
+      "id": 10,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: core triage, pinned sections and section comparison, in-app API key and model choice, plan map data",
+      "summary": "Backend for four requests: Core areas can be required now, like-to-take, or deferred, and when nothing fits the search names what to defer; specific unique numbers can be pinned for a course and compared against each other; the API key and per-job model are set inside the app; and a structured plan map (what to take, fallbacks, left-out items, backups) is served for a richer tree.",
+      "files": [
+        "backend/src/utcoursesplus/{requirements,schedule,plantree,settings,llm,nlpref,syllabus,api}.py",
+        "backend/tests/{conftest,test_schedule,test_api}.py"
+      ],
+      "changes": [
+        {
+          "what": "Core triage",
+          "how": "A Core area is required now (Requirements.core_areas), like-to-take (a 'core:CODE' token in the same ranked list as courses, so courses and Core areas rank against each other), or deferred (in neither). Like-to-take Core areas become optional slots tagged with a wish key; the wishlist feature rewards the rank-weighted share of keys included."
+        },
+        {
+          "what": "Deferral suggestions",
+          "how": "When no schedule exists (including when the requirements alone exceed the credit maximum), schedule.suggest_deferrals removes each required course or Core area in turn, searches again with a smaller node budget, and returns the ones that make a schedule possible, best first. The API returns them as deferrals."
+        },
+        {
+          "what": "Pinned sections",
+          "how": "Requirements.pinned_sections maps a course code to the unique numbers the student will accept. build_slots filters candidates to those uniques for required, like-to-take, core and pick-from slots; if none survive the constraints the problem names the pinned uniques. The API validates that each unique belongs to the course. POST /api/requirements/add-unique pins a unique and adds its course to the chosen list."
+        },
+        {
+          "what": "Section comparison",
+          "how": "schedule.compare_sections runs the full search once per unique with that single section pinned (the course is added as required if it is on neither list) and returns the best schedule, utility, difference from the best, and a plain-language explanation for each; whether the course was included matters for like-to-take courses."
+        },
+        {
+          "what": "Plan map data",
+          "how": "plantree.plan_tree turns the top schedule into groups (required, Core, like to take, electives) with each course's planned section and ordered fallbacks, other Core courses that could replace a Core pick (best by ease), left-out items with a reason (overlap, credit maximum, constraints, or simply scored lower), and the backup schedules marking shared sections. Each section placed in the top schedule now records which slot it fills."
+        },
+        {
+          "what": "API key and models in the app",
+          "how": "settings.py stores the Anthropic key and the model for each job (preferences, audit, syllabus) in data/settings.json with mode 600; the key is never returned, only a hint such as sk-ant-...abcd. A saved key takes precedence over ANTHROPIC_API_KEY. POST /api/settings/test lists the models the key can use through the SDK's models list call and flags chosen models that are not available. llm.structured takes the model from the job name."
+        },
+        {
+          "what": "Test isolation",
+          "how": "conftest.py points the settings file at a temp folder and removes the API key from the environment for every test, so a real key can never be read by a test."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "When the requirements alone exceeded the credit maximum the app said so but offered no way out",
+          "cause": "The early return skipped the deferral search",
+          "fix": "The early return also calls suggest_deferrals; covered by a test that names the three items"
+        }
+      ],
+      "notes": [
+        "Only Anthropic models are supported. The key box and model list are built for the Anthropic API; other providers would need a second client and are not included.",
+        "The key is stored unencrypted in a file only you can read, in the gitignored data folder. Anyone with access to your user account on this computer can read it.",
+        "The model list call needs no tokens, so testing a key costs nothing."
+      ],
+      "id": 11,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat: colour system, plan map, core triage and section pinning UI, section comparison, AI models screen",
+      "summary": "Interface for five requests: a colour system; Core triage and a ranked list that mixes courses and Core areas; pinning specific unique numbers and comparing them; a plan map; and an AI models screen for the API key and per-job model.",
+      "files": [
+        "frontend/src/{styles.css,Requirements,Schedules,PlanMap,Models,Deferrals,App,Calendar,ui,api}.tsx/.ts",
+        "frontend/src/{planlayout.ts,planlayout.test.ts}",
+        "frontend/scripts/contrast.mjs",
+        "backend/src/utcoursesplus/{schedule,api}.py",
+        "backend/tests/test_api.py",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Colour system",
+          "how": "Navy sidebar, headings and table headers; burnt orange for primary buttons, the current screen and focus; teal, amber and red for Open, Waitlisted and Closed text; eight course hues so a course keeps its colour on every calendar; group colours (navy required, teal Core, orange like to take, purple electives, slate backups). Still no gradients, glow, pill shapes or badges, and shadows are used only as focus rings. 36 colour pairs are checked against WCAG AA by npm run contrast and all pass. This relaxes the earlier one-colour-plus-accent rule at the user's request."
+        },
+        {
+          "what": "Core triage UI",
+          "how": "Each Core area has a three-way control: Required now, Like to take, Not this semester. Like to take areas join the same ranked list as courses (shown as 'Core: Humanities'), and the schedule screen lists items to defer when nothing fits, with buttons that move them."
+        },
+        {
+          "what": "Pinning and comparison UI",
+          "how": "Each course row opens a Sections table with a checkbox per unique; an Add a specific section box pins a unique directly. Ranked schedules has a second tab that compares chosen sections of one course: per section, whether a schedule exists, its score, the difference from the best, the reasons, and a calendar of the best schedule."
+        },
+        {
+          "what": "Plan map",
+          "how": "planlayout.ts lays the tree out in columns with parents centred on their children and curved connectors (tested with node:test, five tests); PlanMap.tsx renders each node as a button over an SVG of connectors, highlights the path to the selected node, and shows a details panel with a copy button for unique numbers. Filters control how many fallbacks, other Core courses and backups are shown."
+        },
+        {
+          "what": "AI models screen",
+          "how": "Password-style key box with show and hide, Save, Test (lists the models the key can use) and Remove; default model and one model per job. The key is never displayed after saving."
+        },
+        {
+          "what": "Requirements responsiveness",
+          "how": "Changes show immediately and are reconciled with the server's copy afterwards, so checkboxes no longer snap back while a save is in flight."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Explanations said a preferred-courses difference was worth points 'at your weight of 0%'",
+          "cause": "The weights shown beside explanations were computed by a scorer that did not know about the like-to-take list, which sets that weight to 0 when the list is empty",
+          "fix": "Ranked schedules and comparisons now build the scorer with the same like-to-take weights as the search (wish_weights); a test checks the weight is positive with a list and 0 without"
+        },
+        {
+          "symptom": "Checkbox in the Sections table flickered back after a click",
+          "cause": "State only updated after the save request returned",
+          "fix": "Optimistic update in Requirements.save"
+        },
+        {
+          "symptom": "Syllabi and Data sources screens scrolled sideways on a phone",
+          "cause": "Wide tables with no scroll container",
+          "fix": "On narrow screens tables scroll within themselves"
+        },
+        {
+          "symptom": "The plan map opened scrolled to the top while its root sat in the vertical middle",
+          "cause": "Parents are centred on their children",
+          "fix": "Scroll the map so the root is in view when it is built"
+        }
+      ],
+      "notes": [
+        "Checked in headless Chromium against the synthetic demo database: triage radios, pin toggles, add by unique, plan map selection, comparison, key save with masking, the defer-to-fix flow, and every screen at 1440 and 390 px with no console errors, failed requests or sideways scrolling.",
+        "Not exercised: a real API key against Anthropic (the test endpoint is covered with a stand-in client) and anything that needs your UT login.",
+        "Pinned sections apply to course codes. A Core area can still be filled by any course tagged with it."
+      ],
+      "id": 12,
+      "date": "2026-10-08"
+    },
+    {
+      "commit_message": "feat(ida): import completed courses and open requirements from a saved degree audit",
+      "date": "2026-10-10",
+      "summary": "The saved IDA Results page is read on this computer with a deterministic parser (no language model). Finished and in-progress courses are excluded from search, suggestions and plans; open Core needs and course rules are triaged on the Requirements screen.",
+      "files": [
+        "backend/src/utcoursesplus/ida.py",
+        "backend/src/utcoursesplus/requirements.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/catalog.py",
+        "backend/src/utcoursesplus/plantree.py",
+        "backend/tests/test_ida.py",
+        "backend/tests/test_api.py",
+        "frontend/src/IdaImport.tsx",
+        "frontend/src/Requirements.tsx",
+        "frontend/src/api.ts"
+      ],
+      "changes": [
+        {
+          "what": "IDA parser",
+          "how": "selectolax over the coursework and categories tables; registrar Core codes mapped (031 to 093); Future/Planned rows skipped with a warning; name and EID never read"
+        },
+        {
+          "what": "Core slots",
+          "how": "A Core area lacking 6 hours becomes two slots in the schedule search"
+        },
+        {
+          "what": "Import screen",
+          "how": "Choose the saved file, review each open Core area and course rule as Required now, Like to take or Not this semester, then save"
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "A course marked completed could stay in the required list",
+          "cause": "Nothing reconciled the two lists and a test assertion ended in 'or True' so it never failed",
+          "fix": "Requirements validator drops completed courses from required and preferred lists; test asserts it"
+        }
+      ],
+      "notes": [
+        "Your audit is the entry-level CS audit, so later major requirements are not listed.",
+        "The raw file is not stored or committed."
+      ],
+      "id": 13
+    },
+    {
+      "commit_message": "feat: adaptive registration plan and support for any AI provider",
+      "date": "2026-10-10",
+      "summary": "The registration runner now searches again after each report (got, full, give up, dropped), and the language-model features work with Anthropic, OpenAI, Gemini, xAI or any OpenAI-compatible service.",
+      "files": [
+        "backend/src/utcoursesplus/replan.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/llm.py",
+        "backend/src/utcoursesplus/settings.py",
+        "backend/tests/test_replan.py",
+        "backend/tests/test_api.py",
+        "frontend/src/Registration.tsx",
+        "frontend/src/runner.ts",
+        "frontend/src/runner.test.ts",
+        "frontend/src/Models.tsx",
+        "frontend/src/api.ts",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "Adaptive replanning",
+          "how": "POST /api/plan/replan takes registered, full, dropped and skipped sections. Registered sections are fixed into the slot they satisfy (apply_fixed), full ones are excluded, a given-up course also drops its requirement. If no plan fits, each single drop (then pair) is tried and the best is offered; a clearly better plan reachable by one drop is offered as optional."
+        },
+        {
+          "what": "Runner",
+          "how": "Space got it, right arrow full, X give up, left arrow undo. Reports are saved per plan in the browser and the plan is searched again on reload. The cursor logic is pure and tested."
+        },
+        {
+          "what": "Any AI provider",
+          "how": "Anthropic keeps its SDK. OpenAI, Gemini, xAI and custom services share one httpx client using JSON mode, validated by Pydantic with one retry. Keys and a provider:model choice are stored per provider and per job; old settings files are migrated on read."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Giving up on a required course left no plan at all",
+          "cause": "The requirement stayed after its sections were excluded",
+          "fix": "A skipped course is removed from required and like-to-take lists for the search"
+        },
+        {
+          "symptom": "Model picker would lose focus on each keystroke",
+          "cause": "A component defined inside render remounted",
+          "fix": "Built as a plain function"
+        }
+      ],
+      "notes": [
+        "Drop and replan were exercised in headless Chromium on the synthetic demo database; the drop panel used a mocked response. No real provider call was made: the OpenAI-format client is covered by stand-in HTTP tests, so check your first real call.",
+        "Default model names for non-Anthropic providers are placeholders; Test on the AI models screen lists what your key can use."
+      ],
+      "id": 14
+    },
+    {
+      "commit_message": "feat: run locally with one command, shareable class database, clear README",
+      "date": "2026-10-31",
+      "summary": "A fresh clone now runs with ./start.sh (setup, build and open the browser). The class database can be exported as a schedule-facts-only seed that new clones load automatically, and a demo mode runs on invented data.",
+      "files": [
+        "start.sh",
+        "README.md",
+        ".gitignore",
+        "backend/src/utcoursesplus/seed.py",
+        "backend/src/utcoursesplus/demo.py",
+        "backend/src/utcoursesplus/cli.py",
+        "backend/src/utcoursesplus/config.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/tests/test_seed.py",
+        "backend/tests/demo_db.py",
+        "frontend/src/App.tsx",
+        "frontend/src/ui.tsx",
+        "frontend/src/api.ts"
+      ],
+      "changes": [
+        {
+          "what": "start.sh",
+          "how": "Checks for uv and node, installs packages and builds the interface only on first run, then serves and opens the browser; extra options pass through (--demo, --port)."
+        },
+        {
+          "what": "serve --demo",
+          "how": "Builds synthetic data into data/demo.sqlite on demand; a banner on every screen marks it as invented. The generator moved from tests into the package."
+        },
+        {
+          "what": "Shareable database",
+          "how": "export-seed writes seed/spring2027.sqlite with only schedule tables (VACUUM INTO, then personal and signal tables dropped). serve copies it into place when the local database has no sections and never overwrites existing data. .gitignore allows only that one file."
+        },
+        {
+          "what": "doctor command and README",
+          "how": "doctor lists what is missing. README rewritten around quick start, three ways to get classes, a usage walkthrough and troubleshooting; the stale runner section was removed."
+        }
+      ],
+      "bugs_fixed": [],
+      "notes": [
+        "Checked on a clean copy of the tracked files: npm ci, build, uv sync, doctor and ./start.sh --demo all worked and the API answered.",
+        "The real class database could not be uploaded from this environment. It exists only on your computer, because the schedule needs your UT login. Run uv run utcoursesplus export-seed there, then commit and push seed/spring2027.sqlite. The repository's seed folder is empty until you do."
+      ],
+      "id": 15
+    },
+    {
+      "commit_message": "feat: export every schedule version to a PDF",
+      "date": "2026-10-31",
+      "summary": "Export all as PDF on the Ranked schedules screen downloads one PDF: page one lists the restrictions and writes out the registration backup plans; each ranked and backup schedule then gets a weekly picture, its unique numbers, times, seats, ease scores and schedule score.",
+      "files": [
+        "backend/src/utcoursesplus/pdfexport.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/tests/test_api.py",
+        "backend/tests/test_replan.py",
+        "backend/pyproject.toml",
+        "backend/uv.lock",
+        "frontend/src/Schedules.tsx",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "PDF export",
+          "how": "GET /api/export/schedules.pdf re-runs the search with your saved requirements and preferences and builds the document with reportlab (new dependency). The week picture is drawn directly, with print-safe pastel fills."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Searching with no requirements and a credit minimum raised ZeroDivisionError",
+          "cause": "The bound divided by the number of remaining slots, which is zero when every optional slot is skipped",
+          "fix": "Denominator is at least 1; regression test added"
+        }
+      ],
+      "notes": [
+        "Text pages and layout were checked by rendering the PDF to images; the export button was built and typechecked but not clicked in a browser.",
+        "Export does not change the 'changed since last search' comparison."
+      ],
+      "id": 16
+    },
+    {
+      "commit_message": "refactor(ui): simplify screens with closed-by-default detail and a shorter menu",
+      "date": "2026-10-31",
+      "summary": "Each screen now shows its main task first and keeps detail one click away. The menu has four main steps plus a More group.",
+      "files": [
+        "frontend/src/ui.tsx",
+        "frontend/src/styles.css",
+        "frontend/src/App.tsx",
+        "frontend/src/Schedules.tsx",
+        "frontend/src/Preferences.tsx",
+        "frontend/src/Requirements.tsx",
+        "frontend/src/IdaImport.tsx"
+      ],
+      "changes": [
+        {
+          "what": "Menu",
+          "how": "Requirements, Preferences, Schedules and Register are the main steps; Browse courses, Plan map, Syllabi, Data sources and AI models sit under More."
+        },
+        {
+          "what": "Collapsed detail",
+          "how": "New Fold component. The long intro text on every screen sits behind About this screen. Closed by default: why a schedule ranks, score components, backup schedules, course options, electives, both audit imports, add a specific section, the factor sliders and settings history."
+        },
+        {
+          "what": "Schedules",
+          "how": "The section table has six columns instead of eight; the unchanged-top-schedule notice is hidden; shorter requirement intros."
+        }
+      ],
+      "bugs_fixed": [],
+      "notes": [
+        "Page heights dropped about 40% on Requirements, Preferences and Schedules (for example 2802 to 1480 px).",
+        "Checked at 1440 and 390 px with no overflow or console errors."
+      ],
+      "id": 17
+    },
+    {
+      "commit_message": "feat: consistent schedule builder with either/or choices and no unrequested classes",
+      "date": "2026-11-04",
+      "summary": "Only courses you picked are scheduled. Saved requirements are cleaned by one set of rules, either/or choices are a first-class option, and every section shows why it is in a schedule.",
+      "files": [
+        "backend/src/utcoursesplus/requirements.py",
+        "backend/src/utcoursesplus/schedule.py",
+        "backend/src/utcoursesplus/api.py",
+        "backend/src/utcoursesplus/pdfexport.py",
+        "backend/tests/test_schedule.py",
+        "backend/tests/test_api.py",
+        "frontend/src/Requirements.tsx",
+        "frontend/src/Schedules.tsx",
+        "frontend/src/api.ts",
+        "README.md"
+      ],
+      "changes": [
+        {
+          "what": "No unrequested classes",
+          "how": "Filler electives were silently added whenever picks fell short of the credit minimum. They are now off unless you tick 'Fill any shortfall with suggested electives'; otherwise a shortfall gets a message that names the fix."
+        },
+        {
+          "what": "One cleanup rule",
+          "how": "requirements.normalize runs on every load and save: removes duplicates, drops groups already met by a required or finished course, resolves course codes, clamps pick counts, and discards Core slot counts and pinned sections for things no longer on a list. Audit imports no longer pile up duplicate groups."
+        },
+        {
+          "what": "Either/or choices",
+          "how": "The existing choose-from groups got a visible editor: type 'C S 312 or C S 314' and every schedule takes exactly one. Works with ranking, backups, pins, replanning and the PDF."
+        },
+        {
+          "what": "Counts as",
+          "how": "Each section in a schedule, and the PDF, says whether it is Required, Either/or, Core, Like to take or Filler elective."
+        },
+        {
+          "what": "Clear all requirements",
+          "how": "A button on Requirements resets the lists in one step, keeping finished courses."
+        }
+      ],
+      "bugs_fixed": [
+        {
+          "symptom": "Classes you had not selected appeared in schedules",
+          "cause": "Automatic filler electives, plus invisible leftovers: duplicate audit groups, pinned sections that restricted Core searches after the course was removed, and stale Core slot counts",
+          "fix": "Filler is opt-in and leftovers are removed on save"
+        }
+      ],
+      "notes": [
+        "Existing databases: filler electives are now off. Turn the checkbox on if you relied on them.",
+        "Checked in headless Chromium on demo data: either/or add and remove, shortfall message, clear all."
+      ],
+      "id": 18
+    }
+  ]
+}
